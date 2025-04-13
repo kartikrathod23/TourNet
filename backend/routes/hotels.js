@@ -101,12 +101,106 @@ async function getCityCoordinates(cityName) {
   }
 }
 
-// Get hotels using Amadeus and MAKCORPS APIs
+// Get hotels using RapidAPI, Amadeus and MAKCORPS APIs
 async function getHotelsInArea(cityData) {
   try {
     console.log(`[Hotels] Searching for accommodations in: ${cityData.name}`);
-    const token = await getAmadeusToken();
     let hotels = [];
+    
+    // Try RapidAPI Hotels first (if API key is available)
+    const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
+    const RAPIDAPI_HOST = process.env.RAPIDAPI_HOST || 'hotels4.p.rapidapi.com';
+    
+    if (RAPIDAPI_KEY) {
+      try {
+        console.log(`[Hotels] Searching using RapidAPI Hotels API for ${cityData.name}`);
+        
+        // First get destination ID
+        const destinationResponse = await axios.get('https://hotels4.p.rapidapi.com/locations/v3/search', {
+          params: {
+            q: `${cityData.name}, ${cityData.country}`,
+            locale: 'en_US',
+            langid: '1033'
+          },
+          headers: {
+            'X-RapidAPI-Key': RAPIDAPI_KEY,
+            'X-RapidAPI-Host': RAPIDAPI_HOST
+          }
+        });
+        
+        // Check if we have search results
+        if (destinationResponse.data && 
+            destinationResponse.data.sr && 
+            destinationResponse.data.sr.length > 0) {
+          
+          // Find the first city/region entity 
+          const destination = destinationResponse.data.sr.find(item => 
+            item.type === 'CITY' || item.type === 'NEIGHBORHOOD' || item.type === 'REGION');
+          
+          if (destination && destination.gaiaId) {
+            console.log(`[Hotels] Found destination ID: ${destination.gaiaId} for ${cityData.name}`);
+            
+            // Get hotels list
+            const hotelsResponse = await axios.get('https://hotels4.p.rapidapi.com/properties/v2/list', {
+              params: {
+                destinationId: destination.gaiaId,
+                pageNumber: '1',
+                pageSize: '10',
+                checkIn: getFormattedDate(7),  // 7 days from now
+                checkOut: getFormattedDate(10), // 10 days from now
+                adults1: '2',
+                sortOrder: 'STAR_RATING_HIGHEST_FIRST',
+                locale: 'en_US',
+                currency: 'USD'
+              },
+              headers: {
+                'X-RapidAPI-Key': RAPIDAPI_KEY,
+                'X-RapidAPI-Host': RAPIDAPI_HOST
+              }
+            });
+            
+            // Process hotels data if available
+            if (hotelsResponse.data && 
+                hotelsResponse.data.data && 
+                hotelsResponse.data.data.propertySearch && 
+                hotelsResponse.data.data.propertySearch.properties) {
+              
+              const properties = hotelsResponse.data.data.propertySearch.properties;
+              console.log(`[Hotels] Found ${properties.length} hotels with RapidAPI`);
+              
+              // Map to our format
+              hotels = properties.map(property => {
+                return {
+                  id: property.id || `rapidapi-${Math.random().toString(36).substring(7)}`,
+                  name: property.name,
+                  highlighted_name: property.name,
+                  address: property.neighborhood?.name || cityData.name,
+                  location: `${cityData.name}, ${cityData.country}`,
+                  distance: property.destinationInfo?.distanceFromDestination?.value * 1000 || Math.round(Math.random() * 5000),
+                  kinds: 'accommodations,hotels',
+                  rating: property.star || (Math.floor(Math.random() * 2) + 3),
+                  coords: `${property.mapMarker?.latLong?.latitude || cityData.lat}, ${property.mapMarker?.latLong?.longitude || cityData.lon}`,
+                  description: `${property.name} features ${property.amenities?.join(', ') || 'modern facilities'}`,
+                  price: property.price?.lead?.amount || (Math.floor(Math.random() * 200) + 80),
+                  currency: property.price?.lead?.currencyInfo?.code || 'USD',
+                  images: property.propertyImage?.image?.url ? [property.propertyImage.image.url] : undefined
+                };
+              });
+              
+              if (hotels.length > 0) {
+                return hotels;
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('[Hotels] Error with RapidAPI hotels search:', error.message);
+        // Continue to fallbacks if RapidAPI fails
+      }
+    }
+    
+    // Continue with Amadeus as fallback...
+    const token = await getAmadeusToken();
     
     // Try Amadeus Hotel List API first
     if (cityData.iataCode || cityData.cityCode) {
@@ -252,7 +346,7 @@ async function getHotelsInArea(cityData) {
     return generateMockHotels(cityData.lat, cityData.lon, cityData.name, cityData.country);
   } catch (error) {
     console.error('[Hotels] Error getting hotels in area:', error.message);
-    return generateMockHotels(cityData.lat, cityData.lon, cityData.name);
+    return generateMockHotels(cityData.lat, cityData.lon, cityData.name, cityData.country);
   }
 }
 
@@ -290,6 +384,13 @@ function generateMockHotels(lat, lon, cityName) {
       description: 'This elegant hotel offers guests a comfortable stay with modern amenities. Located in a convenient area with easy access to attractions, restaurants, and shopping districts.'
     };
   });
+}
+
+// Helper function to get dates in YYYY-MM-DD format
+function getFormattedDate(daysFromNow) {
+  const date = new Date();
+  date.setDate(date.getDate() + daysFromNow);
+  return date.toISOString().split('T')[0];
 }
 
 router.get('/search', async (req, res) => {

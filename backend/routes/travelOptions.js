@@ -110,10 +110,12 @@ async function getTransportOptions(cityData) {
   
   // Gather all transport options
   const trainOptions = getTrainOptions(cityData);
-  const flightOptions = getFlightOptions(cityData);
   const busOptions = getBusOptions(cityData);
   const carRentalOptions = getCarRentalOptions(cityData);
   const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Get flight options asynchronously
+  const flightOptions = await getFlightOptions(cityData);
   
   // Combine all options
   return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
@@ -151,7 +153,7 @@ function getTrainOptions(cityData) {
       type: "train",
       name: `${operator} High-Speed Service`,
       description: `Fast train service connecting ${name} to major cities`,
-      price: { amount: 45, currency: "USD" },
+      price: { amount: 3750, currency: "INR" },
       duration: "Varies by destination",
       frequency: "Multiple daily departures"
     });
@@ -162,7 +164,7 @@ function getTrainOptions(cityData) {
     type: "train",
     name: `${operators[operators.length > 1 ? 1 : 0]} Regional Service`,
     description: `Regular train service to surrounding regions from ${name}`,
-    price: { amount: 25, currency: "USD" },
+    price: { amount: 2100, currency: "INR" },
     duration: "Varies by destination",
     frequency: "Hourly departures during daytime"
   });
@@ -174,7 +176,7 @@ function getTrainOptions(cityData) {
       type: "train",
       name: `${country} Rail Pass`,
       description: `Unlimited train travel throughout ${country} for tourists`,
-      price: { amount: 180, currency: "USD" },
+      price: { amount: 15000, currency: "INR" },
       duration: "3, 5, or 7 day options",
       frequency: "Valid on most trains with seat reservation"
     });
@@ -184,14 +186,136 @@ function getTrainOptions(cityData) {
 }
 
 // Generate flight options based on city data
-function getFlightOptions(cityData) {
+async function getFlightOptions(cityData) {
   const { name, country, population } = cityData;
   const options = [];
   
   // Only create flight options for cities likely to have airports
   if (population < 100000) {
-    return [];
+    return options;
   }
+  
+  // Try to get real flight data from SkyScanner API if API key is available
+  const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;
+  const SKYSCANNER_HOST = process.env.SKYSCANNER_HOST || 'skyscanner50.p.rapidapi.com';
+  
+  if (RAPIDAPI_KEY) {
+    try {
+      console.log(`[TravelOptions] Searching for flights via Skyscanner API for ${name}`);
+      
+      // Get airport codes for origin city
+      const airportsResponse = await axios.get('https://skyscanner50.p.rapidapi.com/api/v1/searchAirport', {
+        params: {
+          query: name
+        },
+        headers: {
+          'X-RapidAPI-Key': RAPIDAPI_KEY,
+          'X-RapidAPI-Host': SKYSCANNER_HOST
+        }
+      });
+      
+      if (airportsResponse.data && 
+          airportsResponse.data.data && 
+          airportsResponse.data.data.length > 0) {
+        
+        // Get the first airport for the city
+        const airport = airportsResponse.data.data[0];
+        const originCode = airport.iataCode;
+        
+        console.log(`[TravelOptions] Found airport code ${originCode} for ${name}`);
+        
+        // Define popular destinations to search for flights
+        const popularDestinations = [
+          {code: 'LON', name: 'London'},
+          {code: 'NYC', name: 'New York'},
+          {code: 'PAR', name: 'Paris'},
+          {code: 'DXB', name: 'Dubai'},
+          {code: 'SIN', name: 'Singapore'},
+          {code: 'BKK', name: 'Bangkok'},
+          {code: 'TYO', name: 'Tokyo'},
+          {code: 'SYD', name: 'Sydney'}
+        ];
+        
+        // Filter out the origin city if it's in the list
+        const destinations = popularDestinations.filter(
+          dest => dest.name.toLowerCase() !== name.toLowerCase()
+        ).slice(0, 3); // Limit to 3 destinations to avoid API rate limits
+        
+        // Get departure date (30 days from now)
+        const departureDate = getFormattedDate(30);
+        
+        // Get flight information for each destination
+        const flightPromises = destinations.map(async destination => {
+          try {
+            const flightsResponse = await axios.get('https://skyscanner50.p.rapidapi.com/api/v1/searchFlights', {
+              params: {
+                origin: originCode,
+                destination: destination.code,
+                date: departureDate,
+                adults: '1',
+                currency: 'INR',
+                countryCode: 'IN',
+                market: 'en-IN'
+              },
+              headers: {
+                'X-RapidAPI-Key': RAPIDAPI_KEY,
+                'X-RapidAPI-Host': SKYSCANNER_HOST
+              }
+            });
+            
+            if (flightsResponse.data && 
+                flightsResponse.data.data && 
+                flightsResponse.data.data.length > 0) {
+              
+              // Get cheapest flight
+              const flight = flightsResponse.data.data[0];
+              
+              // Add to our flight options
+              return {
+                type: "flight",
+                name: `${flight.airlines[0].name} to ${destination.name}`,
+                description: `Flight from ${name} (${originCode}) to ${destination.name} (${destination.code})`,
+                price: {
+                  amount: Math.round(flight.price.amount),
+                  currency: flight.price.currency || "INR"
+                },
+                duration: `${Math.floor(flight.duration / 60)}h ${flight.duration % 60}m`,
+                frequency: "Daily flights available",
+                details: {
+                  airline: flight.airlines[0].name,
+                  flightNumber: flight.flight_number || "Various",
+                  departureTime: flight.departure_time || "Various times",
+                  arrivalTime: flight.arrival_time || "Various times",
+                  stops: flight.stops || 0
+                }
+              };
+            }
+            return null;
+          } catch (error) {
+            console.error(`[TravelOptions] Error getting flights to ${destination.name}:`, error.message);
+            return null;
+          }
+        });
+        
+        // Wait for all flight lookups and filter out null results
+        const flightResults = (await Promise.all(flightPromises)).filter(result => result !== null);
+        
+        // Add results to options
+        options.push(...flightResults);
+        
+        if (options.length > 0) {
+          console.log(`[TravelOptions] Found ${options.length} real flights via Skyscanner`);
+          return options;
+        }
+      }
+    } catch (error) {
+      console.error('[TravelOptions] Error with Skyscanner API:', error.message);
+      // Continue to fallback flight options
+    }
+  }
+  
+  // If API call failed or no key available, use our previous flight generation code
+  console.log(`[TravelOptions] Using generated flight options for ${name}`);
   
   // Generate IATA code based on city name
   const getIATACode = (cityName) => {
@@ -251,7 +375,7 @@ function getFlightOptions(cityData) {
       type: "flight",
       name: `${mainAirline} International Flights`,
       description: `Regular flights from ${name} (${iataCode}) to major international destinations`,
-      price: { amount: 350, currency: "USD" },
+      price: { amount: 29000, currency: "INR" },
       duration: "Varies by destination",
       frequency: "Daily flights to major hubs"
     });
@@ -262,7 +386,7 @@ function getFlightOptions(cityData) {
     type: "flight",
     name: `${mainAirline} Domestic Flights`,
     description: `Regular flights from ${name} (${iataCode}) to other cities in ${country}`,
-    price: { amount: 120, currency: "USD" },
+    price: { amount: 10000, currency: "INR" },
     duration: "1-2 hours average",
     frequency: "Multiple daily flights"
   });
@@ -273,13 +397,20 @@ function getFlightOptions(cityData) {
       type: "flight",
       name: `${budgetAirline} Budget Flights`,
       description: `Affordable flights from ${name} with limited services`,
-      price: { amount: 75, currency: "USD" },
+      price: { amount: 6200, currency: "INR" },
       duration: "Varies by destination",
       frequency: "Several weekly flights to popular destinations"
     });
   }
   
   return options;
+}
+
+// Helper function to get dates in YYYY-MM-DD format
+function getFormattedDate(daysFromNow) {
+  const date = new Date();
+  date.setDate(date.getDate() + daysFromNow);
+  return date.toISOString().split('T')[0];
 }
 
 // Generate bus options based on city data
@@ -311,7 +442,7 @@ function getBusOptions(cityData) {
     type: "bus",
     name: `${name} City Bus Tour`,
     description: `Hop-on hop-off sightseeing bus tour around the main attractions of ${name}`,
-    price: { amount: 22, currency: "USD" },
+    price: { amount: 1800, currency: "INR" },
     duration: "1-day pass (24 hours)",
     frequency: "Buses every 15-30 minutes on circular route"
   });
@@ -321,7 +452,7 @@ function getBusOptions(cityData) {
     type: "bus",
     name: `${mainCompany} Intercity Coach Service`,
     description: `Regular coach services connecting ${name} with other cities`,
-    price: { amount: 15, currency: "USD" },
+    price: { amount: 1250, currency: "INR" },
     duration: "Varies by destination",
     frequency: "Multiple daily departures from central bus station"
   });
@@ -332,7 +463,7 @@ function getBusOptions(cityData) {
       type: "bus",
       name: `${companies[1] || mainCompany} Night Coach Service`,
       description: `Overnight coach travel from ${name} to major destinations`,
-      price: { amount: 35, currency: "USD" },
+      price: { amount: 2900, currency: "INR" },
       duration: "Overnight (8-12 hours)",
       frequency: "Daily evening departures"
     });
@@ -356,7 +487,7 @@ function getCarRentalOptions(cityData) {
     type: "car_rental",
     name: `${company1} Compact Car Rental`,
     description: `Affordable compact car rental in ${name} with unlimited mileage`,
-    price: { amount: 35, currency: "USD" },
+    price: { amount: 2900, currency: "INR" },
     duration: "Per day",
     frequency: "Available for pickup at airports and city locations"
   });
@@ -367,7 +498,7 @@ function getCarRentalOptions(cityData) {
       type: "car_rental",
       name: `${company2} SUV Rental`,
       description: `Comfortable SUV rental for exploring ${name} and surrounding areas`,
-      price: { amount: 70, currency: "USD" },
+      price: { amount: 5800, currency: "INR" },
       duration: "Per day",
       frequency: "Available at major rental locations"
     });
@@ -380,7 +511,7 @@ function getCarRentalOptions(cityData) {
       type: "car_rental",
       name: "Luxury Vehicle Rental",
       description: `Premium car rental experience in ${name} with high-end vehicles`,
-      price: { amount: 150, currency: "USD" },
+      price: { amount: 12500, currency: "INR" },
       duration: "Per day",
       frequency: "Reservation required, available at select locations"
     });

@@ -11,6 +11,7 @@ const bookingRoutes = require('./routes/bookings');
 const chatSupportRoutes = require('./routes/chatSupport');
 const paymentRoutes = require('./routes/payment');
 const errorHandler = require('./middleware/errorHandler');
+const axios = require('axios');
 
 dotenv.config();
 

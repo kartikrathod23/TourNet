@@ -6,6 +6,8 @@ import HotelModal from '../components/HotelModal';
 import PackageModal from '../components/PackageModal';
 import TravelModal from '../components/TravelModal';
 import BookingModal from '../components/BookingModal';
+import TravelOptions from '../components/TravelOptions';
+import axios from 'axios';
 
 const Dashboard = () => {
     const [hotels, setHotels] = useState([]);
@@ -16,6 +18,8 @@ const Dashboard = () => {
     const [locationInfo, setLocationInfo] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+    const [travelLoading, setTravelLoading] = useState(false);
+    const [travelError, setTravelError] = useState('');
 
     // State for modals
     const [selectedHotel, setSelectedHotel] = useState(null);
@@ -54,16 +58,19 @@ const Dashboard = () => {
             }
 
             // Fetch travel options
-            const travelRes = await fetch(`http://localhost:5000/api/travel-options/search?city=${location}`);
-            const travelData = await travelRes.json();
-            
-            if (travelData.success) {
-                setTravelOptions(travelData.data?.travelOptions || []);
-                if (!locationInfo) {
-                    setLocationInfo(travelData.data?.location || null);
+            setTravelLoading(true);
+            try {
+                const response = await axios.get(`http://localhost:5000/api/travel-options/search?city=${location}`);
+                if (response.data) {
+                    setTravelOptions(response.data.transportOptions || []);
+                    console.log('Travel options loaded:', response.data.transportOptions);
                 }
-            } else {
-                console.error('Travel options API error:', travelData.error);
+                setTravelError('');
+            } catch (error) {
+                console.error('Travel options API error:', error?.response?.data?.message || error.message || error);
+                setTravelError('Failed to load travel options. Please try again.');
+            } finally {
+                setTravelLoading(false);
             }
 
             // Fetch activities with coordinates from location
@@ -167,6 +174,21 @@ const Dashboard = () => {
                 </div>
             </section>
 
+            {/* Travel Options Section */}
+            <section className="px-6 md:px-12 py-8 bg-white rounded-xl shadow-sm my-8 mx-4">
+                <h3 className="text-2xl font-semibold text-gray-800 mb-6">
+                    🚆 Travel Options 
+                    {locationInfo && <span className="text-lg font-normal text-gray-600 ml-2">for {location}</span>}
+                </h3>
+                
+                <TravelOptions 
+                    options={travelOptions} 
+                    loading={travelLoading} 
+                    error={travelError}
+                    city={location}
+                />
+            </section>
+
             {/* Tour Packages Section */}
             <section className="px-6 md:px-12 py-8">
                 <h3 className="text-2xl font-semibold text-gray-800 mb-6">
@@ -260,64 +282,6 @@ const Dashboard = () => {
                 ) : (
                     <p className="text-center text-gray-500">
                         {loading ? 'Loading hotels...' : 'No hotels available for this location.'}
-                    </p>
-                )}
-            </section>
-
-            {/* Travel Options Section */}
-            <section className="px-6 md:px-12 py-8">
-                <h3 className="text-2xl font-semibold text-gray-800 mb-6">
-                    🚗 Travel Options
-                    {locationInfo && <span className="text-lg font-normal text-gray-600 ml-2">in {locationInfo.name}</span>}
-                </h3>
-                {travelOptions.length > 0 ? (
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        {travelOptions.map((option, i) => (
-                            <div key={i} className="bg-white p-6 rounded-xl shadow-md hover:shadow-lg transition">
-                                <div className="flex justify-between items-start mb-3">
-                                    <h4 className="text-lg font-bold text-blue-700">{option.name}</h4>
-                                    <span className="bg-gray-200 text-gray-700 text-xs px-2 py-1 rounded">
-                                        {option.type}
-                                    </span>
-                                </div>
-                                <p className="text-sm text-gray-600 mb-3">{option.description}</p>
-                                <div className="text-xs text-gray-500 mb-3">
-                                    <p>Capacity: {option.capacity} person{option.capacity > 1 ? 's' : ''}</p>
-                                </div>
-                                
-                                <div className="flex flex-wrap gap-1 mb-3">
-                                    {option.features && option.features.map((feature, j) => (
-                                        <span key={j} className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded-full">
-                                            {feature}
-                                        </span>
-                                    ))}
-                                </div>
-                                
-                                <div className="flex justify-between items-center">
-                                    <p className="text-green-600 font-semibold">
-                                        {option.currency} {option.price} <span className="text-xs text-gray-500">({option.unit})</span>
-                                    </p>
-                                    <div className="flex gap-2">
-                                        <button 
-                                            onClick={() => handleViewTravel(option)}
-                                            className="px-3 py-1 bg-transparent text-blue-600 border border-blue-600 rounded-md hover:bg-blue-50 transition text-sm"
-                                        >
-                                            Details
-                                        </button>
-                                        <button 
-                                            onClick={() => handleBookTravel(option)}
-                                            className="px-3 py-1 bg-green-600 text-white rounded-md hover:bg-green-700 transition text-sm"
-                                        >
-                                            Book
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                ) : (
-                    <p className="text-center text-gray-500">
-                        {loading ? 'Loading travel options...' : 'No travel options available for this location.'}
                     </p>
                 )}
             </section>
