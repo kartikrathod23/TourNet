@@ -5,6 +5,8 @@ const dotenv = require('dotenv');
 const authRoutes = require('./routes/authRoutes');
 const hotelRoutes = require('./routes/hotels');
 const activityRoutes = require('./routes/activities');
+const tourPackageRoutes = require('./routes/tourPackages');
+const travelOptionRoutes = require('./routes/travelOptions');
 
 dotenv.config();
 
@@ -15,6 +17,8 @@ app.use(express.json());
 app.use('/api/auth', authRoutes);
 app.use('/api/hotels', hotelRoutes);
 app.use('/api/activities', activityRoutes);
+app.use('/api/tour-packages', tourPackageRoutes);
+app.use('/api/travel-options', travelOptionRoutes);
 
 mongoose
   .connect(process.env.MONGO_URI)
