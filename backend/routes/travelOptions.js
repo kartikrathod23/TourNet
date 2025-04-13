@@ -103,181 +103,515 @@ async function getCityData(cityName) {
   }
 }
 
-// Get local transport options based on city characteristics
+// Get transport options for a given city
 async function getTransportOptions(cityData) {
-  console.log(`[TravelOptions] Generating transport options for ${cityData.name}`);
+  const { name, country, population, lat, lon } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
   
-  // Base options available for all locations
-  const baseOptions = [
-    {
-      id: `tr-taxi-${cityData.name.toLowerCase().replace(/\s+/g, '-')}`,
-      type: 'Taxi',
-      name: 'Standard Taxi',
-      description: `Comfortable sedan for exploring ${cityData.name} and surroundings`,
-      price: 2000 + Math.floor(Math.random() * 1000),
-      currency: 'INR',
-      unit: 'per day',
-      capacity: 4,
-      features: ['AC', 'GPS Navigation', 'Mineral Water', 'Local Driver']
-    },
-    {
-      id: `tr-suv-${cityData.name.toLowerCase().replace(/\s+/g, '-')}`,
-      type: 'SUV',
-      name: 'Premium SUV',
-      description: `Spacious SUV for comfortable travel around ${cityData.name}`,
-      price: 3500 + Math.floor(Math.random() * 1500),
-      currency: 'INR',
-      unit: 'per day',
-      capacity: 6,
-      features: ['AC', 'GPS Navigation', 'Mineral Water', 'Entertainment System', 'Spacious Luggage']
-    }
-  ];
+  // Gather all transport options
+  const trainOptions = getTrainOptions(cityData);
+  const flightOptions = getFlightOptions(cityData);
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
   
-  // Additional options based on city characteristics
-  const additionalOptions = [];
-  
-  // Big cities with good public transport
-  if (cityData.population > 500000) {
-    console.log(`[TravelOptions] Adding public transport for large city (population: ${cityData.population})`);
-    additionalOptions.push({
-      id: `tr-metro-${cityData.name.toLowerCase().replace(/\s+/g, '-')}`,
-      type: 'Public Transport',
-      name: 'Public Transport Pass',
-      description: `Unlimited access to public transportation in ${cityData.name}`,
-      price: 150 + Math.floor(Math.random() * 100),
-      currency: 'INR',
-      unit: 'per day',
-      capacity: 1,
-      features: ['Convenient', 'Eco-friendly', 'Access to All Areas', 'Avoid Traffic']
-    });
-  }
-  
-  // For coastal cities (by known locations or country characteristics)
-  const coastalCountries = ['Australia', 'Italy', 'Greece', 'Spain', 'Portugal', 'Mexico', 'Brazil', 'Thailand', 'Indonesia', 'Philippines', 'USA'];
-  const beachCities = ['miami', 'bali', 'phuket', 'cancun', 'hawaii', 'maldives', 'goa', 'barcelona', 'nice', 'santorini', 'rio'];
-  
-  if (coastalCountries.includes(cityData.country) || 
-      beachCities.some(city => cityData.name.toLowerCase().includes(city))) {
-    console.log(`[TravelOptions] Adding beach transport options for coastal city: ${cityData.name}`);
-    additionalOptions.push({
-      id: `tr-scooter-${cityData.name.toLowerCase().replace(/\s+/g, '-')}`,
-      type: 'Two Wheeler',
-      name: 'Beach Scooter Rental',
-      description: `Explore the beautiful beaches of ${cityData.name} at your leisure`,
-      price: 500 + Math.floor(Math.random() * 300),
-      currency: 'INR',
-      unit: 'per day',
-      capacity: 2,
-      features: ['Helmet Included', 'Fuel Efficient', 'Easy Parking', 'Fun Way to Travel']
-    });
-    
-    additionalOptions.push({
-      id: `tr-boat-${cityData.name.toLowerCase().replace(/\s+/g, '-')}`,
-      type: 'Boat',
-      name: `${cityData.name} Beach Cruise`,
-      description: `Enjoy the scenic coastline of ${cityData.name} with our popular boat tour`,
-      price: 1500 + Math.floor(Math.random() * 800),
-      currency: 'INR',
-      unit: 'per person',
-      capacity: 1,
-      features: ['Stunning Views', 'Professional Captain', 'Refreshments', 'Snorkeling Equipment']
-    });
-  }
-  
-  // For mountain cities (by known locations or country characteristics)
-  const mountainCountries = ['Switzerland', 'Nepal', 'Austria', 'New Zealand', 'Canada', 'Norway'];
-  const mountainCities = ['shimla', 'manali', 'darjeeling', 'switzerland', 'alps', 'aspen', 'denver', 'himalaya', 'andes', 'pokhara', 'innsbruck', 'chamonix'];
-  
-  if (mountainCountries.includes(cityData.country) || 
-      mountainCities.some(city => cityData.name.toLowerCase().includes(city))) {
-    console.log(`[TravelOptions] Adding mountain transport options for: ${cityData.name}`);
-    additionalOptions.push({
-      id: `tr-jeep-${cityData.name.toLowerCase().replace(/\s+/g, '-')}`,
-      type: 'Off-road',
-      name: 'Mountain Explorer Jeep',
-      description: `Experience the breathtaking mountain views around ${cityData.name}`,
-      price: 3500 + Math.floor(Math.random() * 1500),
-      currency: 'INR',
-      unit: 'per day',
-      capacity: 4,
-      features: ['Experienced Mountain Guide', 'All-Terrain 4x4', 'Picnic Lunch', 'Photo Stops']
-    });
-  }
-  
-  // For all destinations, add a tempo traveller option
-  additionalOptions.push({
-    id: `tr-tempo-${cityData.name.toLowerCase().replace(/\s+/g, '-')}`,
-    type: 'Tempo Traveller',
-    name: 'Tempo Traveller',
-    description: `Perfect for group travel around ${cityData.name} and nearby attractions`,
-    price: 5500 + Math.floor(Math.random() * 2000),
-    currency: 'INR',
-    unit: 'per day',
-    capacity: 12,
-    features: ['AC', 'Reclining Seats', 'Ample Luggage Space', 'Professional Driver']
-  });
-  
-  // Special option for international destinations
-  if (cityData.country !== 'India') {
-    additionalOptions.push({
-      id: `tr-car-rental-${cityData.name.toLowerCase().replace(/\s+/g, '-')}`,
-      type: 'Self-Drive',
-      name: 'Car Rental',
-      description: `Explore ${cityData.name} on your own schedule with our reliable car rental`,
-      price: 3000 + Math.floor(Math.random() * 2000),
-      currency: 'INR',
-      unit: 'per day',
-      capacity: 5,
-      features: ['Insurance Included', 'GPS Navigation', 'Unlimited Mileage', '24/7 Roadside Assistance']
-    });
-  }
-  
-  const result = [...additionalOptions, ...baseOptions];
-  console.log(`[TravelOptions] Generated ${result.length} travel options for ${cityData.name}`);
-  return result;
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
 }
 
+// Generate train options based on city and country
+function getTrainOptions(cityData) {
+  const { name, country, population } = cityData;
+  const options = [];
+  
+  // Major train operators by country
+  const trainOperators = {
+    "France": ["SNCF", "Eurostar", "Thalys"],
+    "Germany": ["Deutsche Bahn", "ICE", "Flixbus Train"],
+    "Italy": ["Trenitalia", "Italo", "Frecciarossa"],
+    "Spain": ["Renfe", "AVE", "OUIGO España"],
+    "UK": ["National Rail", "LNER", "Great Western Railway"],
+    "Japan": ["JR Group", "Shinkansen", "Tokyo Metro"],
+    "India": ["Indian Railways", "Rajdhani Express", "Shatabdi Express"],
+    "China": ["China Railways", "CR High-speed", "Beijing Subway"],
+    "USA": ["Amtrak", "Acela Express", "Northeast Regional"],
+    "Canada": ["VIA Rail", "The Canadian", "Rocky Mountaineer"]
+  };
+  
+  // Default operators for countries not in the list
+  const defaultOperators = ["National Railways", "Express Rail", "Regional Rail"];
+  
+  // Get operators for this country
+  const operators = trainOperators[country] || defaultOperators;
+  
+  // High-speed train for big cities (population > 500,000)
+  if (population > 500000) {
+    const operator = operators[0];
+    options.push({
+      type: "train",
+      name: `${operator} High-Speed Service`,
+      description: `Fast train service connecting ${name} to major cities`,
+      price: { amount: 45, currency: "USD" },
+      duration: "Varies by destination",
+      frequency: "Multiple daily departures"
+    });
+  }
+  
+  // Regional train for all cities
+  options.push({
+    type: "train",
+    name: `${operators[operators.length > 1 ? 1 : 0]} Regional Service`,
+    description: `Regular train service to surrounding regions from ${name}`,
+    price: { amount: 25, currency: "USD" },
+    duration: "Varies by destination",
+    frequency: "Hourly departures during daytime"
+  });
+  
+  // Special rail passes for tourist destinations
+  const touristCountries = ["France", "Italy", "Japan", "Switzerland", "Austria"];
+  if (touristCountries.includes(country)) {
+    options.push({
+      type: "train",
+      name: `${country} Rail Pass`,
+      description: `Unlimited train travel throughout ${country} for tourists`,
+      price: { amount: 180, currency: "USD" },
+      duration: "3, 5, or 7 day options",
+      frequency: "Valid on most trains with seat reservation"
+    });
+  }
+  
+  return options;
+}
+
+// Generate flight options based on city data
+function getFlightOptions(cityData) {
+  const { name, country, population } = cityData;
+  const options = [];
+  
+  // Only create flight options for cities likely to have airports
+  if (population < 100000) {
+    return [];
+  }
+  
+  // Generate IATA code based on city name
+  const getIATACode = (cityName) => {
+    // Real IATA codes for major cities
+    const knownCodes = {
+      "London": "LHR", "Paris": "CDG", "New York": "JFK", "Tokyo": "HND",
+      "Berlin": "BER", "Rome": "FCO", "Madrid": "MAD", "Amsterdam": "AMS",
+      "Dubai": "DXB", "Singapore": "SIN", "Sydney": "SYD", "Toronto": "YYZ",
+      "Bangkok": "BKK", "Hong Kong": "HKG", "Los Angeles": "LAX", "Chicago": "ORD",
+      "Mumbai": "BOM", "Delhi": "DEL", "Istanbul": "IST", "Moscow": "SVO",
+      "Beijing": "PEK", "Shanghai": "PVG", "San Francisco": "SFO", "Miami": "MIA"
+    };
+    
+    if (knownCodes[cityName]) return knownCodes[cityName];
+    
+    // Create a pseudo-code for unknown cities
+    const words = cityName.split(' ');
+    if (words.length === 1) {
+      return cityName.slice(0, 3).toUpperCase();
+    } else {
+      return words.map(word => word.charAt(0)).join('').toUpperCase();
+    }
+  };
+  
+  // Regional airlines by continent/region
+  const regionalAirlines = {
+    "Europe": ["Lufthansa", "Air France", "British Airways", "KLM", "Ryanair", "EasyJet"],
+    "North America": ["American Airlines", "Delta", "United", "Air Canada", "Southwest", "JetBlue"],
+    "Asia": ["ANA", "Singapore Airlines", "Cathay Pacific", "Thai Airways", "JAL", "AirAsia"],
+    "Middle East": ["Emirates", "Qatar Airways", "Etihad Airways", "Turkish Airlines", "Saudia"],
+    "Africa": ["Ethiopian Airlines", "Kenya Airways", "South African Airways", "EgyptAir", "Royal Air Maroc"],
+    "Oceania": ["Qantas", "Air New Zealand", "Virgin Australia", "Fiji Airways"],
+    "South America": ["LATAM", "Avianca", "Gol", "Azul", "Aerolineas Argentinas"]
+  };
+  
+  // Map countries to regions for airline selection
+  const countryToRegion = {
+    "USA": "North America", "Canada": "North America", "Mexico": "North America",
+    "UK": "Europe", "France": "Europe", "Germany": "Europe", "Italy": "Europe", "Spain": "Europe",
+    "Japan": "Asia", "China": "Asia", "India": "Asia", "Thailand": "Asia", "Vietnam": "Asia",
+    "Australia": "Oceania", "New Zealand": "Oceania",
+    "Brazil": "South America", "Argentina": "South America", "Colombia": "South America",
+    "Egypt": "Africa", "South Africa": "Africa", "Kenya": "Africa", "Morocco": "Africa",
+    "UAE": "Middle East", "Saudi Arabia": "Middle East", "Qatar": "Middle East"
+  };
+  
+  const region = countryToRegion[country] || "Europe";
+  const airlines = regionalAirlines[region] || regionalAirlines["Europe"];
+  
+  const mainAirline = airlines[0];
+  const budgetAirline = airlines[airlines.length > 4 ? 4 : 0];
+  const iataCode = getIATACode(name);
+  
+  // International flights for larger cities
+  if (population > 500000) {
+    options.push({
+      type: "flight",
+      name: `${mainAirline} International Flights`,
+      description: `Regular flights from ${name} (${iataCode}) to major international destinations`,
+      price: { amount: 350, currency: "USD" },
+      duration: "Varies by destination",
+      frequency: "Daily flights to major hubs"
+    });
+  }
+  
+  // Domestic flights for all cities with airports
+  options.push({
+    type: "flight",
+    name: `${mainAirline} Domestic Flights`,
+    description: `Regular flights from ${name} (${iataCode}) to other cities in ${country}`,
+    price: { amount: 120, currency: "USD" },
+    duration: "1-2 hours average",
+    frequency: "Multiple daily flights"
+  });
+  
+  // Budget airline options for popular tourist destinations
+  if (population > 200000) {
+    options.push({
+      type: "flight",
+      name: `${budgetAirline} Budget Flights`,
+      description: `Affordable flights from ${name} with limited services`,
+      price: { amount: 75, currency: "USD" },
+      duration: "Varies by destination",
+      frequency: "Several weekly flights to popular destinations"
+    });
+  }
+  
+  return options;
+}
+
+// Generate bus options based on city data
+function getBusOptions(cityData) {
+  const { name, country, population } = cityData;
+  const options = [];
+  
+  // Major bus companies by country/region
+  const busCompanies = {
+    "USA": ["Greyhound", "Megabus", "FlixBus USA"],
+    "UK": ["National Express", "Megabus UK", "Stagecoach"],
+    "Germany": ["FlixBus", "BlaBlaBus", "Eurolines"],
+    "France": ["OUIBUS", "FlixBus France", "Eurolines France"],
+    "Spain": ["ALSA", "Avanza", "FlixBus Spain"],
+    "Italy": ["FlixBus Italy", "MarinoBus", "Itabus"],
+    "India": ["Redbus", "KSRTC", "MSRTC"],
+    "Thailand": ["Transport Co.", "Nakhonchai Air", "Sombat Tour"]
+  };
+  
+  // Default companies for countries not in the list
+  const defaultCompanies = ["National Bus", "Express Coach", "City Connect"];
+  
+  // Get companies for this country
+  const companies = busCompanies[country] || defaultCompanies;
+  const mainCompany = companies[0];
+  
+  // City bus tours
+  options.push({
+    type: "bus",
+    name: `${name} City Bus Tour`,
+    description: `Hop-on hop-off sightseeing bus tour around the main attractions of ${name}`,
+    price: { amount: 22, currency: "USD" },
+    duration: "1-day pass (24 hours)",
+    frequency: "Buses every 15-30 minutes on circular route"
+  });
+  
+  // Intercity bus service for all cities
+  options.push({
+    type: "bus",
+    name: `${mainCompany} Intercity Coach Service`,
+    description: `Regular coach services connecting ${name} with other cities`,
+    price: { amount: 15, currency: "USD" },
+    duration: "Varies by destination",
+    frequency: "Multiple daily departures from central bus station"
+  });
+  
+  // Night bus option for larger cities or tourist routes
+  if (population > 200000) {
+    options.push({
+      type: "bus",
+      name: `${companies[1] || mainCompany} Night Coach Service`,
+      description: `Overnight coach travel from ${name} to major destinations`,
+      price: { amount: 35, currency: "USD" },
+      duration: "Overnight (8-12 hours)",
+      frequency: "Daily evening departures"
+    });
+  }
+  
+  return options;
+}
+
+// Generate car rental options
+function getCarRentalOptions(cityData) {
+  const { name, population } = cityData;
+  const options = [];
+  
+  // Major car rental companies
+  const rentalCompanies = ["Hertz", "Avis", "Enterprise", "Budget", "Sixt", "Europcar"];
+  const company1 = rentalCompanies[0];
+  const company2 = rentalCompanies[1];
+  
+  // Basic rental option (economy car)
+  options.push({
+    type: "car_rental",
+    name: `${company1} Compact Car Rental`,
+    description: `Affordable compact car rental in ${name} with unlimited mileage`,
+    price: { amount: 35, currency: "USD" },
+    duration: "Per day",
+    frequency: "Available for pickup at airports and city locations"
+  });
+  
+  // SUV rental (for larger cities or tourist destinations)
+  if (population > 500000) {
+    options.push({
+      type: "car_rental",
+      name: `${company2} SUV Rental`,
+      description: `Comfortable SUV rental for exploring ${name} and surrounding areas`,
+      price: { amount: 70, currency: "USD" },
+      duration: "Per day",
+      frequency: "Available at major rental locations"
+    });
+  }
+  
+  // Luxury car rental for high-end tourist destinations
+  const luxuryDestinations = ["Paris", "Monaco", "Dubai", "Los Angeles", "Miami", "Cannes", "Milan"];
+  if (luxuryDestinations.includes(name)) {
+    options.push({
+      type: "car_rental",
+      name: "Luxury Vehicle Rental",
+      description: `Premium car rental experience in ${name} with high-end vehicles`,
+      price: { amount: 150, currency: "USD" },
+      duration: "Per day",
+      frequency: "Reservation required, available at select locations"
+    });
+  }
+  
+  return options;
+}
+
+// Generate special transport options based on city
+function getSpecialTransportOptions(cityData) {
+  const { name, country, population } = cityData;
+  const options = [];
+  
+  // City-specific unique transport options
+  const citySpecificTransport = {
+    "Venice": [{
+      type: "boat",
+      name: "Gondola Ride",
+      description: "Traditional Venetian gondola experience through the canals",
+      price: { amount: 80, currency: "USD" },
+      duration: "30 minutes",
+      frequency: "Available throughout the day at multiple locations"
+    }, {
+      type: "boat",
+      name: "Vaporetto Water Bus",
+      description: "Public water bus transportation along the Grand Canal and to outlying islands",
+      price: { amount: 7.5, currency: "USD" },
+      duration: "Single trip or day pass",
+      frequency: "Regular service throughout the day"
+    }],
+    "Amsterdam": [{
+      type: "boat",
+      name: "Canal Cruise",
+      description: "Scenic boat tour through Amsterdam's historic canals",
+      price: { amount: 18, currency: "USD" },
+      duration: "1 hour",
+      frequency: "Departures every 30 minutes from central locations"
+    }],
+    "Dubai": [{
+      type: "boat",
+      name: "Abra Water Taxi",
+      description: "Traditional wooden boat crossing the Dubai Creek",
+      price: { amount: 1, currency: "USD" },
+      duration: "5-10 minutes",
+      frequency: "Continuous service throughout the day"
+    }, {
+      type: "special",
+      name: "Desert Safari",
+      description: "Exciting 4x4 journey through the desert dunes outside Dubai",
+      price: { amount: 85, currency: "USD" },
+      duration: "6 hours",
+      frequency: "Morning and afternoon departures with hotel pickup"
+    }],
+    "Bangkok": [{
+      type: "boat",
+      name: "Chao Phraya River Boat",
+      description: "River boat service along Bangkok's main waterway",
+      price: { amount: 2, currency: "USD" },
+      duration: "Varies by distance",
+      frequency: "Regular service throughout the day"
+    }, {
+      type: "special",
+      name: "Tuk Tuk City Tour",
+      description: "Explore Bangkok in a traditional three-wheeled Tuk Tuk",
+      price: { amount: 15, currency: "USD" },
+      duration: "2-3 hours",
+      frequency: "Available throughout the day"
+    }],
+    "New York": [{
+      type: "ferry",
+      name: "Staten Island Ferry",
+      description: "Free ferry service between Manhattan and Staten Island with views of the Statue of Liberty",
+      price: { amount: 0, currency: "USD" },
+      duration: "25 minutes each way",
+      frequency: "Departures every 30 minutes"
+    }],
+    "San Francisco": [{
+      type: "tram",
+      name: "Cable Car Ride",
+      description: "Historic cable car system through the hills of San Francisco",
+      price: { amount: 8, currency: "USD" },
+      duration: "Varies by route",
+      frequency: "Regular service on three lines"
+    }],
+    "Tokyo": [{
+      type: "train",
+      name: "Tokyo Metro Day Pass",
+      description: "Unlimited access to Tokyo's extensive subway network",
+      price: { amount: 10, currency: "USD" },
+      duration: "24 hours",
+      frequency: "Trains run frequently from early morning until midnight"
+    }],
+    "Kyoto": [{
+      type: "rickshaw",
+      name: "Arashiyama Rickshaw Tour",
+      description: "Traditional pulled rickshaw tour through scenic Arashiyama district",
+      price: { amount: 30, currency: "USD" },
+      duration: "30 minutes",
+      frequency: "Available daily, weather permitting"
+    }],
+    "Rio de Janeiro": [{
+      type: "cable_car",
+      name: "Sugarloaf Mountain Cable Car",
+      description: "Scenic cable car ride to the top of Sugarloaf Mountain with panoramic views",
+      price: { amount: 25, currency: "USD" },
+      duration: "Two sections, approximately 3-4 minutes each",
+      frequency: "Departures every 20 minutes"
+    }]
+  };
+  
+  // Add city-specific transport
+  if (citySpecificTransport[name]) {
+    options.push(...citySpecificTransport[name]);
+  }
+  
+  // Transport options based on country
+  const countryTransport = {
+    "Thailand": [{
+      type: "special",
+      name: "Long-tail Boat Tour",
+      description: "Traditional wooden boat excursion to islands and coastal areas",
+      price: { amount: 25, currency: "USD" },
+      duration: "Half day",
+      frequency: "Daily departures, weather permitting"
+    }],
+    "India": [{
+      type: "special",
+      name: "Auto Rickshaw",
+      description: "Three-wheeled motorized transport common throughout Indian cities",
+      price: { amount: 3, currency: "USD" },
+      duration: "Varies by distance",
+      frequency: "Available throughout the day"
+    }],
+    "Vietnam": [{
+      type: "special",
+      name: "Cyclo Ride",
+      description: "Traditional Vietnamese cycle rickshaw tour through city streets",
+      price: { amount: 10, currency: "USD" },
+      duration: "1 hour",
+      frequency: "Available in main tourist areas"
+    }],
+    "Egypt": [{
+      type: "special",
+      name: "Felucca Sail Boat",
+      description: "Traditional wooden sailing boat on the Nile River",
+      price: { amount: 20, currency: "USD" },
+      duration: "1-2 hours",
+      frequency: "Daily sailings, weather permitting"
+    }],
+    "Morocco": [{
+      type: "special",
+      name: "Camel Trek",
+      description: "Desert camel ride in traditional Moroccan style",
+      price: { amount: 35, currency: "USD" },
+      duration: "1-2 hours",
+      frequency: "Morning and sunset departures"
+    }],
+    "Turkey": [{
+      type: "special",
+      name: "Hot Air Balloon Ride",
+      description: "Scenic balloon flight over Cappadocia's unique landscape",
+      price: { amount: 175, currency: "USD" },
+      duration: "1 hour flight (3-4 hours total experience)",
+      frequency: "Daily morning flights, weather permitting"
+    }]
+  };
+
+  // Add country-specific transport
+  if (countryTransport[country]) {
+    options.push(...countryTransport[country]);
+  }
+  
+  // Add transport based on city size
+  if (population > 1000000) { // Big city
+    options.push({
+      type: "special",
+      name: "Hop-on Hop-off Bus Tour",
+      description: `Comprehensive city tour of ${name} with audio guide in multiple languages`,
+      price: { amount: 30, currency: "USD" },
+      duration: "24-hour pass",
+      frequency: "Buses every 15-30 minutes on circular route"
+    });
+    
+    options.push({
+      type: "special",
+      name: "Bike Sharing",
+      description: `Public bike rental network throughout ${name}`,
+      price: { amount: 10, currency: "USD" },
+      duration: "Day pass",
+      frequency: "Bikes available at stations across the city"
+    });
+  }
+  
+  return options;
+}
+
+// Get transport options for a specific city
 router.get('/search', async (req, res) => {
   try {
-    const city = req.query.city || 'Paris';
-    console.log(`[TravelOptions] Received request for travel options in: ${city}`);
+    const { city } = req.query;
+    
+    if (!city) {
+      return res.status(400).json({ message: 'City name is required' });
+    }
+    
+    console.log(`[TravelOptions] Searching for transport options in ${city}`);
     
     // Get city data
     const cityData = await getCityData(city);
     
     if (!cityData) {
-      console.log(`[TravelOptions] Failed to find coordinates for city: ${city}`);
-      return res.status(404).json({ 
-        success: false, 
-        error: 'City not found. Please try another location.' 
-      });
+      return res.status(404).json({ message: 'City not found' });
     }
     
-    // Get transport options based on city characteristics
-    const travelOptions = await getTransportOptions(cityData);
+    // Generate transport options
+    const transportOptions = await getTransportOptions(cityData);
     
-    console.log(`[TravelOptions] Sending response with ${travelOptions.length} travel options for ${cityData.name}`);
+    // Return the response
     res.json({
-      success: true,
-      data: {
-        location: {
-          name: cityData.name,
-          country: cityData.country,
-          coordinates: {
-            lat: cityData.lat,
-            lon: cityData.lon
-          }
-        },
-        travelOptions: travelOptions
-      }
+      city: cityData.name,
+      country: cityData.country,
+      coordinates: {
+        latitude: cityData.lat,
+        longitude: cityData.lon
+      },
+      transportOptions
     });
-  } catch (err) {
-    console.error('[TravelOptions] API error:', err.message);
-    res.status(500).json({ 
-      success: false, 
-      error: 'Travel options API fetch failed', 
-      message: err.message 
-    });
+    
+  } catch (error) {
+    console.error('[TravelOptions] Error:', error.message);
+    res.status(500).json({ message: 'Error fetching travel options', error: error.message });
   }
 });
 

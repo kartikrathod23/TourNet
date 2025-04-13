@@ -121,25 +121,6 @@ const Dashboard = () => {
 
     return (
         <div className="min-h-screen bg-gray-50 text-gray-800">
-            {/* Navbar */}
-            <header className="bg-gray-300/80 backdrop-blur-md shadow-md px-6 md:px-12 py-4 flex items-center justify-between sticky top-0 z-50">
-                <h1 className="text-2xl font-bold text-blue-700">TourNet</h1>
-
-                {/* Nav Links */}
-                <nav className="hidden md:flex gap-8 text-sm font-medium text-gray-700">
-                    <a href="#" className="hover:text-blue-600 transition">Home</a>
-                    <a href="#" className="hover:text-blue-600 transition">Destinations</a>
-                    <a href="#" className="hover:text-blue-600 transition">Bookings</a>
-                    <a href="#" className="hover:text-blue-600 transition">Support</a>
-                    <a href="#" className="hover:text-blue-600 transition">Contact</a>
-                </nav>
-
-                {/* Auth Buttons */}
-                <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center shadow-md cursor-pointer">
-                    <span className="text-purple-600 text-lg">👤</span>
-                </div>
-            </header>
-
             {/* Search Section */}
             <section className="relative w-[97.5vw] h-64 md:h-80 lg:h-[22rem] bg-cover bg-center my-10 rounded-xl mx-4 shadow-lg overflow-hidden"
                 style={{

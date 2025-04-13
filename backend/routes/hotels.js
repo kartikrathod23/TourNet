@@ -101,15 +101,16 @@ async function getCityCoordinates(cityName) {
   }
 }
 
-// Get hotels using Amadeus Hotel Search API
+// Get hotels using Amadeus and MAKCORPS APIs
 async function getHotelsInArea(cityData) {
   try {
     console.log(`[Hotels] Searching for accommodations in: ${cityData.name}`);
     const token = await getAmadeusToken();
+    let hotels = [];
     
-    // Try to use the Amadeus Hotel Search API if we have a city code
+    // Try Amadeus Hotel List API first
     if (cityData.iataCode || cityData.cityCode) {
-      console.log(`[Hotels] Searching using city code: ${cityData.cityCode || cityData.iataCode}`);
+      console.log(`[Hotels] Searching using Amadeus Hotel List API with city code: ${cityData.cityCode || cityData.iataCode}`);
       try {
         const response = await axios.get('https://test.api.amadeus.com/v1/reference-data/locations/hotels/by-city', {
           params: {
@@ -126,23 +127,76 @@ async function getHotelsInArea(cityData) {
         if (response.data && response.data.data && response.data.data.length > 0) {
           console.log(`[Hotels] Found ${response.data.data.length} hotels with Amadeus API`);
           
-          // Convert Amadeus hotel data to our format
-          const hotels = response.data.data.slice(0, 15).map((hotel, index) => {
-            return {
-              id: hotel.hotelId || `hotel-${index}`,
-              name: hotel.name,
-              highlighted_name: hotel.name,
-              address: hotel.address?.lines?.join(', ') || 'Address not available',
-              location: `${cityData.name}, ${cityData.country}`,
-              distance: Math.round((Math.random() * 5 + 0.5) * 1000), // Random distance between 0.5-5.5 km
-              kinds: 'accomodations,hotels',
-              rating: (3 + Math.random() * 2).toFixed(1),
-              coords: `${hotel.geoCode?.latitude || cityData.lat}, ${hotel.geoCode?.longitude || cityData.lon}`,
-              description: 'Modern hotel with excellent amenities and convenient location.'
-            };
+          // Get hotel details for each hotel (first 5 only to avoid rate limits)
+          const hotelPromises = response.data.data.slice(0, 5).map(async (hotel) => {
+            try {
+              const hotelDetailResponse = await axios.get(`https://test.api.amadeus.com/v2/e-reputation/hotel-sentiments`, {
+                params: {
+                  hotelIds: hotel.hotelId
+                },
+                headers: {
+                  Authorization: `Bearer ${token}`
+                }
+              });
+              
+              // Merge hotel details with basic hotel data
+              if (hotelDetailResponse.data && hotelDetailResponse.data.data && hotelDetailResponse.data.data.length > 0) {
+                const hotelDetails = hotelDetailResponse.data.data[0];
+                return {
+                  id: hotel.hotelId,
+                  name: hotel.name,
+                  highlighted_name: hotel.name,
+                  address: hotel.address?.lines?.join(', ') || 'Address not available',
+                  location: `${cityData.name}, ${cityData.country}`,
+                  distance: Math.round((Math.random() * 5 + 0.5) * 1000), // Random distance 
+                  kinds: 'accommodations,hotels',
+                  rating: hotelDetails.overallRating?.toFixed(1) || (3 + Math.random() * 2).toFixed(1),
+                  coords: `${hotel.geoCode?.latitude || cityData.lat}, ${hotel.geoCode?.longitude || cityData.lon}`,
+                  description: hotelDetails.sentiments?.cleanliness?.text || 'Comfortable hotel with excellent amenities.',
+                  price: Math.round((Math.random() * 200 + 100) * 10) / 10
+                };
+              } else {
+                // Fallback if hotel details not available
+                return {
+                  id: hotel.hotelId,
+                  name: hotel.name,
+                  highlighted_name: hotel.name,
+                  address: hotel.address?.lines?.join(', ') || 'Address not available',
+                  location: `${cityData.name}, ${cityData.country}`,
+                  distance: Math.round((Math.random() * 5 + 0.5) * 1000),
+                  kinds: 'accommodations,hotels',
+                  rating: (3 + Math.random() * 2).toFixed(1),
+                  coords: `${hotel.geoCode?.latitude || cityData.lat}, ${hotel.geoCode?.longitude || cityData.lon}`,
+                  description: 'Modern hotel with excellent amenities and convenient location.',
+                  price: Math.round((Math.random() * 200 + 100) * 10) / 10
+                };
+              }
+            } catch (error) {
+              console.error(`[Hotels] Error getting details for hotel ${hotel.hotelId}:`, error.message);
+              // Return basic hotel data if details fetch fails
+              return {
+                id: hotel.hotelId,
+                name: hotel.name,
+                highlighted_name: hotel.name,
+                address: hotel.address?.lines?.join(', ') || 'Address not available',
+                location: `${cityData.name}, ${cityData.country}`,
+                distance: Math.round((Math.random() * 5 + 0.5) * 1000),
+                kinds: 'accommodations,hotels',
+                rating: (3 + Math.random() * 2).toFixed(1),
+                coords: `${hotel.geoCode?.latitude || cityData.lat}, ${hotel.geoCode?.longitude || cityData.lon}`,
+                description: 'Modern hotel with excellent amenities and convenient location.',
+                price: Math.round((Math.random() * 200 + 100) * 10) / 10
+              };
+            }
           });
           
-          return hotels;
+          // Wait for all hotel details to be fetched
+          hotels = await Promise.all(hotelPromises);
+          
+          // If we found hotels, return them
+          if (hotels.length > 0) {
+            return hotels;
+          }
         }
       } catch (error) {
         console.error('[Hotels] Error with Amadeus hotel search:', error.message);
@@ -150,9 +204,52 @@ async function getHotelsInArea(cityData) {
       }
     }
     
-    // If Amadeus API failed or didn't return results, use generated data
+    // Try MAKCORPS API as a backup
+    console.log('[Hotels] Trying MAKCORPS API for', cityData.name);
+    try {
+      const MAKCORPS_API_KEY = process.env.MAKCORPS_API_KEY || '67fa6c3452e973f6e1553088';
+      const response = await axios.get(`https://api.makcorps.com/free/hotels/byCity`, {
+        params: {
+          city: cityData.name,
+          country: cityData.country,
+          limit: 10
+        },
+        headers: {
+          'Authorization': `Bearer ${MAKCORPS_API_KEY}`
+        }
+      });
+      
+      if (response.data && response.data.hotels && response.data.hotels.length > 0) {
+        console.log(`[Hotels] Found ${response.data.hotels.length} hotels with MAKCORPS API`);
+        
+        hotels = response.data.hotels.map((hotel, index) => {
+          return {
+            id: hotel.id || `hotel-${index}`,
+            name: hotel.name,
+            highlighted_name: hotel.name,
+            address: hotel.address || 'Address not available',
+            location: `${cityData.name}, ${cityData.country}`,
+            distance: hotel.distance_to_center || Math.round((Math.random() * 5 + 0.5) * 1000),
+            kinds: 'accommodations,hotels',
+            rating: hotel.rating || (3 + Math.random() * 2).toFixed(1),
+            coords: `${hotel.latitude || cityData.lat}, ${hotel.longitude || cityData.lon}`,
+            description: hotel.description || 'Comfortable hotel with good amenities.',
+            price: hotel.price || Math.round((Math.random() * 200 + 100) * 10) / 10
+          };
+        });
+        
+        if (hotels.length > 0) {
+          return hotels;
+        }
+      }
+    } catch (error) {
+      console.error('[Hotels] Error with MAKCORPS API:', error.message);
+      // Continue to fallback if MAKCORPS API fails
+    }
+    
+    // If both APIs failed or didn't return results, use generated data
     console.log('[Hotels] Using mock hotel data for', cityData.name);
-    return generateMockHotels(cityData.lat, cityData.lon, cityData.name);
+    return generateMockHotels(cityData.lat, cityData.lon, cityData.name, cityData.country);
   } catch (error) {
     console.error('[Hotels] Error getting hotels in area:', error.message);
     return generateMockHotels(cityData.lat, cityData.lon, cityData.name);

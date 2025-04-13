@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import axios from 'axios';
 
 const BookingModal = ({ item, type, isOpen, onClose }) => {
   const [bookingStep, setBookingStep] = useState(1);
@@ -18,6 +19,7 @@ const BookingModal = ({ item, type, isOpen, onClose }) => {
   });
   const [isLoading, setIsLoading] = useState(false);
   const [confirmationNumber, setConfirmationNumber] = useState('');
+  const [bookingError, setBookingError] = useState('');
 
   if (!isOpen) return null;
 
@@ -29,13 +31,34 @@ const BookingModal = ({ item, type, isOpen, onClose }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
+    setBookingError('');
 
-    // Simulate API call for booking
-    setTimeout(() => {
+    try {
+      // Prepare the booking data
+      const bookingData = {
+        ...bookingDetails,
+        itemId: item.id || item._id || `${type}-${Date.now()}`,
+        itemName: getItemName(),
+        itemPrice: getItemPrice(),
+        itemType: type,
+        itemDetails: { ...item }
+      };
+
+      // Send to the API
+      const response = await axios.post('http://localhost:5000/api/bookings', bookingData);
+      
+      if (response.data && response.data.confirmationNumber) {
+        setConfirmationNumber(response.data.confirmationNumber);
+        setBookingStep(2);
+      } else {
+        throw new Error('No confirmation received from server');
+      }
+    } catch (error) {
+      console.error('Booking error:', error);
+      setBookingError(error.response?.data?.error || 'Failed to complete booking. Please try again.');
+    } finally {
       setIsLoading(false);
-      setConfirmationNumber('BK' + Math.floor(Math.random() * 10000000));
-      setBookingStep(2);
-    }, 1500);
+    }
   };
 
   const getItemName = () => {
@@ -86,6 +109,12 @@ const BookingModal = ({ item, type, isOpen, onClose }) => {
                   </div>
                 </div>
               </div>
+
+              {bookingError && (
+                <div className="bg-red-100 text-red-700 p-4 rounded-lg mb-6">
+                  {bookingError}
+                </div>
+              )}
 
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
