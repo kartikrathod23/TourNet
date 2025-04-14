@@ -2,6 +2,9 @@ const express = require('express');
 const axios = require('axios');
 const router = express.Router();
 require('dotenv').config();
+const mongoose = require('mongoose');
+const TourPackage = require('../models/TourPackage');
+const { protect, authorize } = require('../middleware/auth');
 
 // Use Amadeus credentials from .env file
 const AMADEUS_CLIENT_ID = process.env.AMADEUS_CLIENT_ID || 'DgTBGYPmUf8GxGGvfLjcqgEH4sAeFQur';
@@ -349,6 +352,374 @@ router.get('/search', async (req, res) => {
       success: false, 
       error: 'Tour packages API fetch failed', 
       message: err.message 
+    });
+  }
+});
+
+// @desc    Get all tour packages
+// @route   GET /api/tour-packages
+// @access  Public
+router.get('/', async (req, res) => {
+  try {
+    const { 
+      search, 
+      duration, 
+      minPrice, 
+      maxPrice, 
+      difficulty, 
+      category,
+      destination,
+      sort
+    } = req.query;
+
+    // Build query
+    const query = {};
+
+    // Search
+    if (search) {
+      query.$text = { $search: search };
+    }
+
+    // Filter by duration
+    if (duration) {
+      const days = parseInt(duration);
+      query['duration.days'] = { $lte: days };
+    }
+
+    // Filter by price range
+    if (minPrice || maxPrice) {
+      query.price = {};
+      if (minPrice) query.price.amount = { ...query.price.amount, $gte: parseInt(minPrice) };
+      if (maxPrice) query.price.amount = { ...query.price.amount, $lte: parseInt(maxPrice) };
+    }
+
+    // Filter by difficulty
+    if (difficulty) {
+      query.difficulty = difficulty;
+    }
+
+    // Filter by category
+    if (category) {
+      query.categories = { $in: [category] };
+    }
+
+    // Filter by destination
+    if (destination) {
+      query['destinations.name'] = { $regex: new RegExp(destination, 'i') };
+    }
+
+    // Only active packages for public view
+    query.isActive = true;
+
+    // Determine sort order
+    let sortOption = { createdAt: -1 }; // Default: newest first
+    
+    if (sort === 'price-low') {
+      sortOption = { 'price.amount': 1 };
+    } else if (sort === 'price-high') {
+      sortOption = { 'price.amount': -1 };
+    } else if (sort === 'rating') {
+      sortOption = { averageRating: -1 };
+    } else if (sort === 'popularity') {
+      sortOption = { bookingCount: -1 };
+    }
+
+    // Pagination
+    const page = parseInt(req.query.page, 10) || 1;
+    const limit = parseInt(req.query.limit, 10) || 10;
+    const startIndex = (page - 1) * limit;
+
+    const total = await TourPackage.countDocuments(query);
+    
+    const packages = await TourPackage.find(query)
+      .sort(sortOption)
+      .skip(startIndex)
+      .limit(limit)
+      .populate('createdBy', 'fullName email')
+      .lean();
+
+    // Add pagination info
+    const pagination = {
+      total,
+      pages: Math.ceil(total / limit),
+      currentPage: page,
+      perPage: limit
+    };
+
+    res.status(200).json({
+      success: true,
+      count: packages.length,
+      pagination,
+      data: packages
+    });
+
+  } catch (error) {
+    console.error('Error getting tour packages:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+});
+
+// @desc    Get single tour package
+// @route   GET /api/tour-packages/:id
+// @access  Public
+router.get('/:id', async (req, res) => {
+  try {
+    const tourPackage = await TourPackage.findById(req.params.id)
+      .populate('createdBy', 'fullName email agentCompany')
+      .populate('reviews');
+
+    if (!tourPackage) {
+      return res.status(404).json({
+        success: false,
+        message: 'Tour package not found'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: tourPackage
+    });
+  } catch (error) {
+    console.error('Error getting tour package:', error);
+    
+    // Handle invalid ObjectId
+    if (error.kind === 'ObjectId') {
+      return res.status(404).json({
+        success: false,
+        message: 'Tour package not found'
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+});
+
+// @desc    Create new tour package
+// @route   POST /api/tour-packages
+// @access  Private (agent, admin)
+router.post('/', protect, async (req, res) => {
+  try {
+    // Check if user is agent or admin
+    if (req.user.role !== 'agent' && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Only tour agents and admins can create packages'
+      });
+    }
+
+    // Add user ID to request body
+    req.body.createdBy = req.user.id;
+
+    // Create tour package
+    const tourPackage = await TourPackage.create(req.body);
+
+    res.status(201).json({
+      success: true,
+      data: tourPackage
+    });
+  } catch (error) {
+    console.error('Error creating tour package:', error);
+    
+    // Handle validation errors
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(val => val.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        errors: messages
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+});
+
+// @desc    Update tour package
+// @route   PUT /api/tour-packages/:id
+// @access  Private (owner agent, admin)
+router.put('/:id', protect, async (req, res) => {
+  try {
+    let tourPackage = await TourPackage.findById(req.params.id);
+
+    if (!tourPackage) {
+      return res.status(404).json({
+        success: false,
+        message: 'Tour package not found'
+      });
+    }
+
+    // Check if user is the creator or an admin
+    if (tourPackage.createdBy.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to update this tour package'
+      });
+    }
+
+    // Prevent changing the creator
+    if (req.body.createdBy) {
+      delete req.body.createdBy;
+    }
+
+    // Update the package
+    tourPackage = await TourPackage.findByIdAndUpdate(
+      req.params.id,
+      { $set: req.body },
+      { new: true, runValidators: true }
+    );
+
+    res.status(200).json({
+      success: true,
+      data: tourPackage
+    });
+  } catch (error) {
+    console.error('Error updating tour package:', error);
+    
+    // Handle validation errors
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(val => val.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        errors: messages
+      });
+    }
+    
+    // Handle invalid ObjectId
+    if (error.kind === 'ObjectId') {
+      return res.status(404).json({
+        success: false,
+        message: 'Tour package not found'
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+});
+
+// @desc    Delete tour package
+// @route   DELETE /api/tour-packages/:id
+// @access  Private (owner agent, admin)
+router.delete('/:id', protect, async (req, res) => {
+  try {
+    const tourPackage = await TourPackage.findById(req.params.id);
+
+    if (!tourPackage) {
+      return res.status(404).json({
+        success: false,
+        message: 'Tour package not found'
+      });
+    }
+
+    // Check if user is the creator or an admin
+    if (tourPackage.createdBy.toString() !== req.user.id && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Not authorized to delete this tour package'
+      });
+    }
+
+    await tourPackage.deleteOne();
+
+    res.status(200).json({
+      success: true,
+      data: {}
+    });
+  } catch (error) {
+    console.error('Error deleting tour package:', error);
+    
+    // Handle invalid ObjectId
+    if (error.kind === 'ObjectId') {
+      return res.status(404).json({
+        success: false,
+        message: 'Tour package not found'
+      });
+    }
+    
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+});
+
+// @desc    Get packages by agent
+// @route   GET /api/tour-packages/agent/:agentId
+// @access  Public
+router.get('/agent/:agentId', async (req, res) => {
+  try {
+    // Validate if agentId is a valid ObjectId
+    if (!mongoose.Types.ObjectId.isValid(req.params.agentId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid agent ID'
+      });
+    }
+
+    const packages = await TourPackage.find({ 
+      createdBy: req.params.agentId,
+      isActive: true
+    }).sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      count: packages.length,
+      data: packages
+    });
+  } catch (error) {
+    console.error('Error getting agent packages:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+});
+
+// @desc    Get my packages (as an agent)
+// @route   GET /api/tour-packages/my-packages
+// @access  Private (agent)
+router.get('/my-packages', protect, async (req, res) => {
+  try {
+    // Check if user is agent
+    if (req.user.role !== 'agent' && req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Access restricted to tour agents and admins'
+      });
+    }
+
+    const packages = await TourPackage.find({ createdBy: req.user.id })
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      count: packages.length,
+      data: packages
+    });
+  } catch (error) {
+    console.error('Error getting my packages:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
     });
   }
 });

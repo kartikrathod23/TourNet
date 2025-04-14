@@ -67,6 +67,71 @@ const UserSchema = new mongoose.Schema({
       }
     }
   },
+  // Agent specific details
+  agencyDetails: {
+    name: {
+      type: String,
+      trim: true
+    },
+    address: {
+      type: String,
+      trim: true
+    },
+    phone: {
+      type: String,
+      trim: true
+    },
+    license: {
+      type: String,
+      trim: true
+    },
+    website: {
+      type: String,
+      trim: true
+    },
+    description: {
+      type: String,
+      trim: true
+    },
+    logo: {
+      type: String
+    },
+    verificationStatus: {
+      type: String,
+      enum: ['pending', 'verified', 'rejected'],
+      default: 'pending'
+    },
+    verificationDate: {
+      type: Date
+    },
+    reviewedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    }
+  },
+  // Agent statistics
+  statistics: {
+    totalPackages: {
+      type: Number,
+      default: 0
+    },
+    totalBookings: {
+      type: Number,
+      default: 0
+    },
+    totalRevenue: {
+      type: Number,
+      default: 0
+    },
+    avgRating: {
+      type: Number,
+      default: 0
+    },
+    totalReviews: {
+      type: Number,
+      default: 0
+    }
+  },
   favoriteListings: [
     {
       type: mongoose.Schema.Types.ObjectId,
@@ -74,20 +139,27 @@ const UserSchema = new mongoose.Schema({
     }
   ],
   resetPasswordToken: String,
-  resetPasswordExpire: Date
+  resetPasswordExpire: Date,
+  isActive: {
+    type: Boolean,
+    default: true
+  },
+  lastLogin: {
+    type: Date
+  }
 }, {
   timestamps: true
 });
 
 // Encrypt password using bcrypt
-UserSchema.pre('save', async function(next) {
-  if (!this.isModified('password')) {
-    next();
-  }
+// UserSchema.pre('save', async function(next) {
+//   if (!this.isModified('password')) {
+//     next();
+//   }
 
-  const salt = await bcrypt.genSalt(10);
-  this.password = await bcrypt.hash(this.password, salt);
-});
+//   const salt = await bcrypt.genSalt(10);
+//   this.password = await bcrypt.hash(this.password, salt);
+// });
 
 // Sign JWT and return
 UserSchema.methods.getSignedJwtToken = function() {

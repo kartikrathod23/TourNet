@@ -82,20 +82,101 @@ const TravelOptions = ({ options, loading, error, city }) => {
               
               return (
                 <div key={index} className="bg-white rounded-xl shadow-md hover:shadow-lg transition p-5">
-                  <div className="flex justify-between items-start mb-3">
-                    <h5 className="font-bold text-blue-700 text-lg">{option.name}</h5>
-                    <span className="bg-blue-600 text-white text-sm px-2 py-1 rounded-md">
-                      ₹{priceInRupees}
-                    </span>
-                  </div>
+                  {/* Special header format for flights */}
+                  {type === 'flight' ? (
+                    <div className="mb-3">
+                      <div className="flex justify-between items-center mb-2">
+                        <div className="flex items-center">
+                          <h5 className="font-bold text-blue-700 text-lg mr-2">{option.details.airline}</h5>
+                          {option.details.flightNumber && (
+                            <span className="text-sm text-gray-500">({option.details.flightNumber})</span>
+                          )}
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <span className={`text-xs px-2 py-1 rounded-full ${
+                            option.details.nonstop 
+                              ? 'bg-green-100 text-green-800' 
+                              : 'bg-blue-100 text-blue-800'
+                          }`}>
+                            {option.details.nonstop ? 'Non-stop' : `${option.details.stops} stop${option.details.stops > 1 ? 's' : ''}`}
+                          </span>
+                          {option.details.status && (
+                            <span className={`text-xs px-2 py-1 rounded-full ${
+                              option.details.status === 'On Time' 
+                                ? 'bg-green-100 text-green-800'
+                                : option.details.status === 'Delayed'
+                                ? 'bg-yellow-100 text-yellow-800'
+                                : 'bg-red-100 text-red-800'
+                            }`}>
+                              {option.details.status}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center justify-between text-sm mb-2">
+                        <div className="flex flex-col">
+                          <span className="font-bold text-gray-800">{option.details.departureTime}</span>
+                          <span className="text-xs text-gray-500">{option.details.origin || ''}</span>
+                          {option.details.departureTerminal && (
+                            <span className="text-xs text-gray-500">Terminal: {option.details.departureTerminal}</span>
+                          )}
+                        </div>
+                        
+                        <div className="flex flex-1 items-center px-2">
+                          <div className="h-0.5 flex-1 bg-gray-300"></div>
+                          <span className="mx-2 text-xs text-gray-500">{option.duration}</span>
+                          <div className="h-0.5 flex-1 bg-gray-300"></div>
+                        </div>
+                        
+                        <div className="flex flex-col text-right">
+                          <span className="font-bold text-gray-800">{option.details.arrivalTime}</span>
+                          <span className="text-xs text-gray-500">{option.details.destination || ''}</span>
+                          {option.details.arrivalTerminal && (
+                            <span className="text-xs text-gray-500">Terminal: {option.details.arrivalTerminal}</span>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {option.details.aircraft && (
+                        <div className="text-xs text-gray-500 mb-2">
+                          Aircraft: {option.details.aircraft}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="flex justify-between items-start mb-3">
+                      <h5 className="font-bold text-blue-700 text-lg">{option.name}</h5>
+                      <span className="bg-blue-600 text-white text-sm px-2 py-1 rounded-md">
+                        ₹{priceInRupees}
+                      </span>
+                    </div>
+                  )}
                   
-                  <p className="text-gray-600 text-sm mb-4">{option.description}</p>
+                  {type !== 'flight' && (
+                    <p className="text-gray-600 text-sm mb-4">{option.description}</p>
+                  )}
+                  
+                  {/* Pricing for flights displayed differently */}
+                  {type === 'flight' && (
+                    <div className="bg-green-50 border border-green-100 rounded-lg p-3 mb-4">
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-700 text-sm">Price:</span>
+                        <span className="text-xl font-bold text-green-700">₹{priceInRupees}</span>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-1">One way • Economy</p>
+                    </div>
+                  )}
                   
                   <div className="text-gray-700 text-sm space-y-1">
-                    <p><span className="font-semibold">Duration:</span> {option.duration}</p>
-                    <p><span className="font-semibold">Frequency:</span> {option.frequency}</p>
+                    {type !== 'flight' && (
+                      <>
+                        <p><span className="font-semibold">Duration:</span> {option.duration}</p>
+                        <p><span className="font-semibold">Frequency:</span> {option.frequency}</p>
+                      </>
+                    )}
                     
-                    {option.details && (
+                    {option.details && type !== 'flight' && (
                       <div className="mt-3 text-xs text-gray-500 bg-gray-50 p-2 rounded">
                         {option.details.airline && <p className="mb-1">Airline: {option.details.airline}</p>}
                         {option.details.flightNumber && <p className="mb-1">Flight: {option.details.flightNumber}</p>}
@@ -105,9 +186,14 @@ const TravelOptions = ({ options, loading, error, city }) => {
                     )}
                   </div>
                   
-                  <button className="mt-4 w-full py-2 bg-white border border-blue-600 text-blue-600 rounded-md hover:bg-blue-50 transition text-sm font-medium">
-                    View Details
-                  </button>
+                  <div className="flex items-center justify-between mt-4">
+                    <button className="flex-1 py-2 bg-white border border-blue-600 text-blue-600 rounded-md hover:bg-blue-50 transition text-sm font-medium mr-2">
+                      View Details
+                    </button>
+                    <button className="flex-1 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition text-sm font-medium">
+                      Book Now
+                    </button>
+                  </div>
                 </div>
               );
             })}

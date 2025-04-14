@@ -15,6 +15,7 @@ const Dashboard = () => {
     const [tourPackages, setTourPackages] = useState([]);
     const [travelOptions, setTravelOptions] = useState([]);
     const [location, setLocation] = useState('Paris');
+    const [originLocation, setOriginLocation] = useState('Delhi');
     const [locationInfo, setLocationInfo] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
@@ -57,10 +58,16 @@ const Dashboard = () => {
                 console.error('Tour packages API error:', packagesData.error);
             }
 
-            // Fetch travel options
+            // Fetch travel options with both origin and destination locations
             setTravelLoading(true);
             try {
-                const response = await axios.get(`http://localhost:5000/api/travel-options/search?city=${location}`);
+                const travelParams = new URLSearchParams();
+                travelParams.append('city', location); // destination
+                if (originLocation) {
+                    travelParams.append('origin', originLocation);
+                }
+                
+                const response = await axios.get(`http://localhost:5000/api/travel-options/search?${travelParams.toString()}`);
                 if (response.data) {
                     setTravelOptions(response.data.transportOptions || []);
                     console.log('Travel options loaded:', response.data.transportOptions);
@@ -143,13 +150,22 @@ const Dashboard = () => {
                         {/* Search Section */}
                         <h2 className="text-3xl md:text-4xl font-bold text-gray-200 mb-4">Where do you want to go?</h2>
                         <form onSubmit={handleSearch} className="flex justify-center flex-wrap gap-4">
-                            <input
-                                type="text"
-                                placeholder="Search destinations..."
-                                value={location}
-                                onChange={(e) => setLocation(e.target.value)}
-                                className="w-72 md:w-96 px-4 py-2 rounded-md border-3 border-gray-100 text-gray-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            />
+                            <div className="flex flex-col md:flex-row gap-4">
+                                <input
+                                    type="text"
+                                    placeholder="From (Origin City)"
+                                    value={originLocation}
+                                    onChange={(e) => setOriginLocation(e.target.value)}
+                                    className="w-72 md:w-64 px-4 py-2 rounded-md border-3 border-gray-100 text-gray-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                />
+                                <input
+                                    type="text"
+                                    placeholder="To (Destination)"
+                                    value={location}
+                                    onChange={(e) => setLocation(e.target.value)}
+                                    className="w-72 md:w-64 px-4 py-2 rounded-md border-3 border-gray-100 text-gray-800 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                />
+                            </div>
                             <button 
                                 type="submit"
                                 className="bg-blue-600 text-white px-6 py-2 rounded-md hover:bg-blue-700 transition"
@@ -178,7 +194,9 @@ const Dashboard = () => {
             <section className="px-6 md:px-12 py-8 bg-white rounded-xl shadow-sm my-8 mx-4">
                 <h3 className="text-2xl font-semibold text-gray-800 mb-6">
                     🚆 Travel Options 
-                    {locationInfo && <span className="text-lg font-normal text-gray-600 ml-2">for {location}</span>}
+                    {originLocation && location && (
+                        <span className="text-lg font-normal text-gray-600 ml-2">from {originLocation} to {location}</span>
+                    )}
                 </h3>
                 
                 <TravelOptions 

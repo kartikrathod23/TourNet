@@ -12,6 +12,11 @@ const chatSupportRoutes = require('./routes/chatSupport');
 const paymentRoutes = require('./routes/payment');
 const errorHandler = require('./middleware/errorHandler');
 const axios = require('axios');
+const tourPackagesRoutes = require('./routes/tourPackages');
+const travelOptionsRoutes = require('./routes/travelOptions');
+const hotelsRoutes = require('./routes/hotels');
+const hotelAuthRoutes = require('./routes/hotelAuth');
+const hotelRoomsRoutes = require('./routes/hotelRooms');
 
 dotenv.config();
 
@@ -27,6 +32,11 @@ app.use('/api/travel-options', travelOptionRoutes);
 app.use('/api/bookings', bookingRoutes);
 app.use('/api/chat-support', chatSupportRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/tour-packages', tourPackagesRoutes);
+app.use('/api/travel-options', travelOptionsRoutes);
+app.use('/api/hotels', hotelsRoutes);
+app.use('/api/hotel-auth', hotelAuthRoutes);
+app.use('/api/hotel-rooms', hotelRoomsRoutes);
 
 // Error handler middleware
 app.use(errorHandler);

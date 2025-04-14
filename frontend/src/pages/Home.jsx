@@ -56,6 +56,7 @@ const Home = () => {
     const [popularDestinations, setPopularDestinations] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
+    const [originCity, setOriginCity] = useState('');
 
     useEffect(() => {
         // Simulate fetching popular destinations
@@ -115,8 +116,20 @@ const Home = () => {
 
     const handleSearch = (e) => {
         e.preventDefault();
-        // In a real app, this would trigger a search API call
-        console.log('Searching for:', searchQuery);
+        // In a real app, this would trigger a search API call with both origin and destination
+        console.log('Searching for:', searchQuery, 'from', originCity);
+        
+        // Redirect to the search results or destination page with both parameters
+        if (searchQuery) {
+            const params = new URLSearchParams();
+            params.append('city', searchQuery);
+            if (originCity) {
+                params.append('origin', originCity);
+            }
+            
+            // Navigate to the search results
+            window.location.href = `/search?${params.toString()}`;
+        }
     };
 
     return (
@@ -145,27 +158,40 @@ const Home = () => {
 
                         {/* Search Form */}
                         <form onSubmit={handleSearch} className="max-w-xl mx-auto relative mb-8">
-                            <input
-                                type="text"
-                                placeholder="Where would you like to go?"
-                                className="w-full px-6 py-4 rounded-full text-gray-800 bg-white/95 shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                            />
-                            <button 
-                                type="submit" 
-                                className="absolute right-2 top-1/2 transform -translate-y-1/2 bg-blue-600 hover:bg-blue-700 text-white rounded-full p-3"
-                            >
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                                </svg>
-                            </button>
+                            <div className="flex flex-col md:flex-row gap-2 mb-3">
+                                <div className="flex-1 relative">
+                                    <input
+                                        type="text"
+                                        placeholder="From (Origin City)"
+                                        className="w-full px-6 py-4 rounded-full text-gray-800 bg-white/95 shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        value={originCity}
+                                        onChange={(e) => setOriginCity(e.target.value)}
+                                    />
+                                </div>
+                                <div className="flex-1 relative">
+                                    <input
+                                        type="text"
+                                        placeholder="To (Destination)"
+                                        className="w-full px-6 py-4 rounded-full text-gray-800 bg-white/95 shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        value={searchQuery}
+                                        onChange={(e) => setSearchQuery(e.target.value)}
+                                    />
+                                    <button 
+                                        type="submit" 
+                                        className="absolute right-2 top-1/2 transform -translate-y-1/2 bg-blue-600 hover:bg-blue-700 text-white rounded-full p-3"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
                         </form>
 
                         <Link to="/signup">
                             <button className="bg-blue-600 hover:bg-blue-700 px-8 py-4 rounded-full text-white font-semibold transition transform hover:scale-105 shadow-lg">
                                 Start Your Adventure
-                            </button>
+                        </button>
                         </Link>
                     </div>
                 </div>
@@ -235,9 +261,9 @@ const Home = () => {
                                                 Explore
                                             </button>
                                         </div>
-                                    </div>
-                                </div>
-                            ))}
+                            </div>
+                        </div>
+                    ))}
                         </div>
                     )}
                 </div>
@@ -260,11 +286,11 @@ const Home = () => {
                                         alt={testimonial.name} 
                                         className="w-12 h-12 rounded-full object-cover"
                                     />
-                                    <div>
+                        <div>
                                         <h3 className="font-semibold">{testimonial.name}</h3>
                                         <p className="text-gray-600 text-sm">{testimonial.location}</p>
-                                    </div>
-                                </div>
+                        </div>
+                        </div>
                                 <div className="flex mb-3">
                                     {[...Array(5)].map((_, i) => (
                                         <svg 
@@ -301,7 +327,7 @@ const Home = () => {
                         <Link to="/login">
                             <button className="bg-transparent hover:bg-blue-700 border-2 border-white px-8 py-3 rounded-lg font-semibold shadow-md transform hover:scale-105 transition">
                                 Login
-                            </button>
+                        </button>
                         </Link>
                     </div>
                 </div>
@@ -352,7 +378,7 @@ const Home = () => {
                             <li><a href="#" className="text-gray-400 hover:text-white transition">Travel Tips</a></li>
                             <li><a href="#" className="text-gray-400 hover:text-white transition">COVID-19 Updates</a></li>
                         </ul>
-                    </div>
+                        </div>
                     <div>
                         <h3 className="font-semibold text-lg mb-4">Subscribe</h3>
                         <p className="text-gray-400 mb-4">Subscribe to our newsletter for the latest travel deals.</p>

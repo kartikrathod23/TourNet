@@ -1,0 +1,4459 @@
+const express = require('express');
+const axios = require('axios');
+const router = express.Router();
+require('dotenv').config();
+
+// Use Amadeus credentials from .env file
+const AMADEUS_CLIENT_ID = process.env.AMADEUS_CLIENT_ID || 'DgTBGYPmUf8GxGGvfLjcqgEH4sAeFQur';
+const AMADEUS_CLIENT_SECRET = process.env.AMADEUS_CLIENT_SECRET || 'rydShJXrJSmcHRFw';
+let AMADEUS_ACCESS_TOKEN = null;
+let TOKEN_EXPIRY = null;
+
+// Function to get Amadeus access token
+async function getAmadeusToken() {
+  try {
+    // Check if we already have a valid token
+    const now = new Date();
+    if (AMADEUS_ACCESS_TOKEN && TOKEN_EXPIRY && now < TOKEN_EXPIRY) {
+      return AMADEUS_ACCESS_TOKEN;
+    }
+
+    // Otherwise, get a new token
+    console.log('[TravelOptions] Getting new Amadeus access token');
+    const response = await axios.post(
+      'https://test.api.amadeus.com/v1/security/oauth2/token',
+      `grant_type=client_credentials&client_id=${AMADEUS_CLIENT_ID}&client_secret=${AMADEUS_CLIENT_SECRET}`,
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        }
+      }
+    );
+
+    if (response.data && response.data.access_token) {
+      AMADEUS_ACCESS_TOKEN = response.data.access_token;
+      // Set expiry (token usually valid for 30 minutes, but we'll use 25 to be safe)
+      TOKEN_EXPIRY = new Date(now.getTime() + 25 * 60000);
+      return AMADEUS_ACCESS_TOKEN;
+    } else {
+      throw new Error('Failed to obtain Amadeus access token');
+    }
+  } catch (error) {
+    console.error('[TravelOptions] Error getting Amadeus token:', error.message);
+    throw error;
+  }
+}
+
+// Get city data using Amadeus API
+async function getCityData(cityName) {
+  try {
+    console.log(`[TravelOptions] Searching for city: ${cityName}`);
+    const token = await getAmadeusToken();
+
+    // Use Amadeus Airport & City Search API
+    const response = await axios.get('https://test.api.amadeus.com/v1/reference-data/locations', {
+      params: {
+        keyword: cityName,
+        subType: 'CITY',
+        'page[limit]': 1
+      },
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    });
+
+    if (response.data && response.data.data && response.data.data.length > 0) {
+      const cityInfo = response.data.data[0];
+      console.log(`[TravelOptions] Found city: ${cityInfo.name}`);
+
+      return {
+        lat: cityInfo.geoCode?.latitude || 48.8566,
+        lon: cityInfo.geoCode?.longitude || 2.3522,
+        name: cityInfo.name || cityName,
+        country: cityInfo.address?.countryName || 'Unknown',
+        population: 500000, // Amadeus doesn't provide population data
+        iataCode: cityInfo.iataCode || null,
+        cityCode: cityInfo.cityCode || null
+      };
+    }
+
+    // If city not found, use default data
+    console.log('[TravelOptions] City not found in Amadeus, using default location (Paris)');
+    return {
+      lat: 48.8566,
+      lon: 2.3522,
+      name: cityName || 'Paris',
+      country: 'France',
+      population: 2000000,
+      iataCode: 'PAR',
+      cityCode: 'PAR'
+    };
+  } catch (error) {
+    console.error('[TravelOptions] Error getting city data:', error.message);
+    // Return default coordinates as fallback
+    return {
+      lat: 48.8566,
+      lon: 2.3522,
+      name: cityName || 'Paris',
+      country: 'France',
+      population: 2000000,
+      iataCode: 'PAR',
+      cityCode: 'PAR'
+    };
+  }
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Gather all transport options
+  const trainOptions = getTrainOptions(cityData);
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Get flight options asynchronously
+  const flightOptions = await getFlightOptions(cityData);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get Indian train options using Gemini API
+async function getIndianTrainOptions(originCity, destinationCity) {
+  console.log(`[TravelOptions] Fetching Indian train options from ${originCity} to ${destinationCity}`);
+  
+  try {
+    // Try to get real train data from Gemini
+    const trainData = await getTrainsFromGemini(originCity, destinationCity);
+    
+    if (trainData && Array.isArray(trainData) && trainData.length > 0) {
+      // Process the Gemini train data into our standard format
+      const processedTrains = processGeminiTrainData(trainData, originCity, destinationCity);
+      console.log(`[TravelOptions] Successfully got ${processedTrains.length} trains from Gemini`);
+      return processedTrains;
+    } else {
+      console.log(`[TravelOptions] No train data from Gemini, using fallback Indian trains`);
+      // If Gemini data fails, create fallback Indian trains
+      return getIndianFallbackTrains(originCity, destinationCity);
+    }
+  } catch (error) {
+    console.error(`[TravelOptions] Error getting Indian train options:`, error);
+    return getIndianFallbackTrains(originCity, destinationCity);
+  }
+}
+
+// Generate fallback Indian train options
+function getIndianFallbackTrains(originCity, destinationCity) {
+  console.log(`[TravelOptions] Generating fallback Indian trains from ${originCity} to ${destinationCity}`);
+  
+  // Common Indian train types
+  const trainTypes = [
+    { 
+      name: "Rajdhani Express", 
+      speed: "fast", 
+      classes: ["1A", "2A", "3A"],
+      hasFood: true 
+    },
+    { 
+      name: "Shatabdi Express", 
+      speed: "fast", 
+      classes: ["CC", "EC"],
+      hasFood: true 
+    },
+    { 
+      name: "Duronto Express", 
+      speed: "fast", 
+      classes: ["1A", "2A", "3A", "SL"],
+      hasFood: true 
+    },
+    { 
+      name: "Superfast Express", 
+      speed: "medium", 
+      classes: ["2A", "3A", "SL", "GEN"],
+      hasFood: false 
+    },
+    { 
+      name: "Passenger", 
+      speed: "slow", 
+      classes: ["GEN", "SL"],
+      hasFood: false 
+    }
+  ];
+  
+  // Generate 2-3 random train options
+  const options = [];
+  const usedNumbers = new Set();
+  const numTrains = Math.floor(Math.random() * 2) + 2; // 2-3 trains
+  
+  for (let i = 0; i < numTrains; i++) {
+    // Pick a random train type
+    const trainType = trainTypes[Math.floor(Math.random() * trainTypes.length)];
+    
+    // Generate a unique train number
+    let trainNumber;
+    do {
+      trainNumber = String(10000 + Math.floor(Math.random() * 10000));
+    } while (usedNumbers.has(trainNumber));
+    usedNumbers.add(trainNumber);
+    
+    // Generate departure and arrival times based on speed
+    let durationHours;
+    if (trainType.speed === "fast") {
+      durationHours = 3 + Math.floor(Math.random() * 4); // 3-6 hours
+    } else if (trainType.speed === "medium") {
+      durationHours = 5 + Math.floor(Math.random() * 5); // 5-9 hours
+    } else {
+      durationHours = 7 + Math.floor(Math.random() * 6); // 7-12 hours
+    }
+    
+    const durationMinutes = Math.floor(Math.random() * 60);
+    const departureHour = 5 + Math.floor(Math.random() * 16); // 5 AM to 8 PM
+    const departureMinute = Math.floor(Math.random() * 60);
+    
+    // Format times
+    const departureTime = `${departureHour.toString().padStart(2, '0')}:${departureMinute.toString().padStart(2, '0')}`;
+    
+    // Calculate arrival time
+    const totalMinutes = departureHour * 60 + departureMinute + durationHours * 60 + durationMinutes;
+    const arrivalHour = Math.floor(totalMinutes / 60) % 24;
+    const arrivalMinute = totalMinutes % 60;
+    const arrivalTime = `${arrivalHour.toString().padStart(2, '0')}:${arrivalMinute.toString().padStart(2, '0')}`;
+    
+    // Format duration
+    const durationText = `${durationHours}h ${durationMinutes}m`;
+    
+    // Generate price based on distance (duration as proxy) and class
+    const baseFare = 300 + (durationHours * 150);
+    const prices = {};
+    trainType.classes.forEach(travelClass => {
+      switch(travelClass) {
+        case "1A": prices[travelClass] = Math.round(baseFare * 4.5); break;
+        case "2A": prices[travelClass] = Math.round(baseFare * 3); break;
+        case "3A": prices[travelClass] = Math.round(baseFare * 2); break;
+        case "CC": prices[travelClass] = Math.round(baseFare * 1.8); break;
+        case "EC": prices[travelClass] = Math.round(baseFare * 2.5); break;
+        case "SL": prices[travelClass] = Math.round(baseFare * 1.2); break;
+        case "GEN": prices[travelClass] = baseFare; break;
+        default: prices[travelClass] = baseFare;
+      }
+    });
+    
+    // Find the cheapest class
+    const cheapestClass = Object.keys(prices).reduce((a, b) => prices[a] < prices[b] ? a : b);
+    
+    // Add train option
+    options.push({
+      type: "train",
+      name: `${trainType.name} (${trainNumber})`,
+      description: `Train from ${originCity} to ${destinationCity}`,
+      price: { 
+        amount: prices[cheapestClass], 
+        currency: "INR" 
+      },
+      duration: durationText,
+      frequency: "Daily",
+      details: {
+        trainNumber: trainNumber,
+        trainType: trainType.name,
+        departureTime: departureTime,
+        arrivalTime: arrivalTime,
+        travelClasses: trainType.classes.join(", "),
+        prices: prices,
+        hasFood: trainType.hasFood
+      }
+    });
+  }
+  
+  return options;
+}
+
+// Get flight options using Amadeus API
+async function getFlightOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating flight options for ${name}, ${country}`);
+  
+  try {
+    const token = await getAmadeusToken();
+    const response = await axios.get('https://test.api.amadeus.com/v2/shopping/flight-offers', {
+      params: {
+        originLocationCode: origin,
+        destinationLocationCode: cityData.iataCode,
+        departureDate: '2023-07-01',
+        returnDate: '2023-07-08',
+        adults: 1
+      },
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    });
+
+    if (response.data && response.data.data && response.data.data.length > 0) {
+      const flightOptions = response.data.data.map(flight => ({
+        type: "flight",
+        name: flight.itineraries[0].segments[0].carrierCode + flight.itineraries[0].segments[0].number,
+        description: `Flight from ${origin} to ${cityData.iataCode}`,
+        price: {
+          amount: flight.price.total,
+          currency: flight.price.currency
+        },
+        duration: flight.itineraries[0].duration,
+        frequency: "Daily",
+        details: {
+          departureTime: flight.itineraries[0].segments[0].departure.at,
+          arrivalTime: flight.itineraries[0].segments[0].arrival.at,
+          travelClasses: flight.itineraries[0].segments[0].bookingClass,
+          stops: flight.itineraries[0].segments.length - 1,
+          airline: flight.itineraries[0].segments[0].carrierCode
+        }
+      }));
+      console.log(`[TravelOptions] Successfully got ${flightOptions.length} flight options`);
+      return flightOptions;
+    } else {
+      console.log(`[TravelOptions] No flight data from Amadeus, using fallback flight options`);
+      // If Amadeus data fails, create fallback flight options
+      return getFlightFallbackOptions(cityData);
+    }
+  } catch (error) {
+    console.error('[TravelOptions] Error getting flight options:', error.message);
+    return getFlightFallbackOptions(cityData);
+  }
+}
+
+// Generate fallback flight options
+function getFlightFallbackOptions(cityData) {
+  console.log(`[TravelOptions] Generating fallback flight options for ${cityData.name}, ${cityData.country}`);
+  
+  // Common flight types
+  const flightTypes = [
+    {
+      name: "Economy",
+      speed: "medium",
+      classes: ["Y"],
+      hasFood: true
+    },
+    {
+      name: "Business",
+      speed: "fast",
+      classes: ["C"],
+      hasFood: true
+    },
+    {
+      name: "First",
+      speed: "fast",
+      classes: ["F"],
+      hasFood: true
+    }
+  ];
+  
+  // Generate 2-3 random flight options
+  const options = [];
+  const usedNumbers = new Set();
+  const numFlights = Math.floor(Math.random() * 2) + 2; // 2-3 flights
+  
+  for (let i = 0; i < numFlights; i++) {
+    // Pick a random flight type
+    const flightType = flightTypes[Math.floor(Math.random() * flightTypes.length)];
+    
+    // Generate a unique flight number
+    let flightNumber;
+    do {
+      flightNumber = String(10000 + Math.floor(Math.random() * 10000));
+    } while (usedNumbers.has(flightNumber));
+    usedNumbers.add(flightNumber);
+    
+    // Generate departure and arrival times based on speed
+    let durationHours;
+    if (flightType.speed === "fast") {
+      durationHours = 3 + Math.floor(Math.random() * 4); // 3-6 hours
+    } else if (flightType.speed === "medium") {
+      durationHours = 5 + Math.floor(Math.random() * 5); // 5-9 hours
+    } else {
+      durationHours = 7 + Math.floor(Math.random() * 6); // 7-12 hours
+    }
+    
+    const durationMinutes = Math.floor(Math.random() * 60);
+    const departureHour = 5 + Math.floor(Math.random() * 16); // 5 AM to 8 PM
+    const departureMinute = Math.floor(Math.random() * 60);
+    
+    // Format times
+    const departureTime = `${departureHour.toString().padStart(2, '0')}:${departureMinute.toString().padStart(2, '0')}`;
+    
+    // Calculate arrival time
+    const totalMinutes = departureHour * 60 + departureMinute + durationHours * 60 + durationMinutes;
+    const arrivalHour = Math.floor(totalMinutes / 60) % 24;
+    const arrivalMinute = totalMinutes % 60;
+    const arrivalTime = `${arrivalHour.toString().padStart(2, '0')}:${arrivalMinute.toString().padStart(2, '0')}`;
+    
+    // Format duration
+    const durationText = `${durationHours}h ${durationMinutes}m`;
+    
+    // Generate price based on distance (duration as proxy) and class
+    const baseFare = 300 + (durationHours * 150);
+    const prices = {};
+    flightType.classes.forEach(travelClass => {
+      switch(travelClass) {
+        case "Y": prices[travelClass] = Math.round(baseFare * 4.5); break;
+        case "C": prices[travelClass] = Math.round(baseFare * 3); break;
+        case "F": prices[travelClass] = Math.round(baseFare * 2); break;
+        default: prices[travelClass] = baseFare;
+      }
+    });
+    
+    // Find the cheapest class
+    const cheapestClass = Object.keys(prices).reduce((a, b) => prices[a] < prices[b] ? a : b);
+    
+    // Add flight option
+    options.push({
+      type: "flight",
+      name: `${flightType.name} (${flightNumber})`,
+      description: `Flight from ${cityData.origin} to ${cityData.iataCode}`,
+      price: { 
+        amount: prices[cheapestClass], 
+        currency: "INR" 
+      },
+      duration: durationText,
+      frequency: "Daily",
+      details: {
+        flightNumber: flightNumber,
+        flightType: flightType.name,
+        departureTime: departureTime,
+        arrivalTime: arrivalTime,
+        travelClasses: flightType.classes.join(", "),
+        prices: prices,
+        hasFood: flightType.hasFood
+      }
+    });
+  }
+  
+  return options;
+}
+
+// Get other transport options
+function getBusOptions(cityData) {
+  // Implement bus options generation logic
+  return [];
+}
+
+// Get other transport options
+function getCarRentalOptions(cityData) {
+  // Implement car rental options generation logic
+  return [];
+}
+
+// Get special transport options
+function getSpecialTransportOptions(cityData) {
+  // Implement special transport options generation logic
+  return [];
+}
+
+// Get train options
+function getTrainOptions(cityData) {
+  // Implement train options generation logic
+  return [];
+}
+
+// Get other transport options synchronously
+const busOptions = getBusOptions(cityData);
+const carRentalOptions = getCarRentalOptions(cityData);
+const specialOptions = getSpecialTransportOptions(cityData);
+  
+// Wait for all async operations to complete
+const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+// Combine all options
+return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+  const carRentalOptions = getCarRentalOptions(cityData);
+  const specialOptions = getSpecialTransportOptions(cityData);
+  
+  // Wait for all async operations to complete
+  const [trainOptions, flightOptions] = await Promise.all(optionPromises);
+  
+  // Combine all options
+  return [...trainOptions, ...flightOptions, ...busOptions, ...carRentalOptions, ...specialOptions];
+}
+
+// Get transport options for a given city
+async function getTransportOptions(cityData) {
+  const { name, country, population, lat, lon, origin } = cityData;
+  console.log(`[TravelOptions] Generating transport options for ${name}, ${country}`);
+  
+  // Create a promises array to gather all options concurrently
+  const optionPromises = [];
+  
+  // For Indian cities, use Gemini API to get real train data if origin is provided
+  if (country === "India" && origin) {
+    optionPromises.push(getIndianTrainOptions(origin, name));
+  } else {
+    // Use fallback train options for other countries or when no origin is specified
+    optionPromises.push(Promise.resolve(getTrainOptions(cityData)));
+  }
+  
+  // Get flight options asynchronously
+  optionPromises.push(getFlightOptions(cityData));
+  
+  // Get other transport options synchronously
+  const busOptions = getBusOptions(cityData);
+ 

@@ -1,13 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
+import TravelOptions from '../components/TravelOptions';
 
-const Destinations = () => {
+const Destinations = ({ initialSearch }) => {
   const [destinations, setDestinations] = useState([]);
   const [filteredDestinations, setFilteredDestinations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [originCity, setOriginCity] = useState('');
+  const [travelOptions, setTravelOptions] = useState([]);
+  const [loadingTravelOptions, setLoadingTravelOptions] = useState(false);
   const [filters, setFilters] = useState({
     continent: 'all',
     budget: 'all',
@@ -43,12 +47,53 @@ const Destinations = () => {
   ];
 
   useEffect(() => {
+    // If initialSearch is provided, set the search query and potentially fetch travel options
+    if (initialSearch) {
+      setSearchQuery(initialSearch.city);
+      if (initialSearch.origin) {
+        setOriginCity(initialSearch.origin);
+        // Fetch travel options with both origin and destination
+        fetchTravelOptions(initialSearch.city, initialSearch.origin);
+      }
+    }
+  }, [initialSearch]);
+
+  useEffect(() => {
     fetchDestinations();
   }, []);
 
   useEffect(() => {
     filterDestinations();
   }, [searchQuery, filters, destinations]);
+
+  // Function to fetch travel options from the backend
+  const fetchTravelOptions = async (city, origin) => {
+    if (!city) return;
+    
+    setLoadingTravelOptions(true);
+    try {
+      // Build the query parameters
+      const params = new URLSearchParams();
+      params.append('city', city);
+      if (origin) {
+        params.append('origin', origin);
+      }
+      
+      // Make the API call
+      const response = await axios.get(`/api/travel-options/search?${params.toString()}`);
+      
+      if (response.data && response.data.transportOptions) {
+        setTravelOptions(response.data.transportOptions);
+      } else {
+        setTravelOptions([]);
+      }
+    } catch (error) {
+      console.error('Error fetching travel options:', error);
+      setError('Failed to load travel options. Please try again later.');
+    } finally {
+      setLoadingTravelOptions(false);
+    }
+  };
 
   const fetchDestinations = async () => {
     setLoading(true);
@@ -261,11 +306,21 @@ const Destinations = () => {
     setSearchQuery(e.target.value);
   };
   
+  const handleOriginChange = (e) => {
+    setOriginCity(e.target.value);
+  };
+  
   const handleFilterChange = (type, value) => {
     setFilters(prev => ({
       ...prev,
       [type]: value
     }));
+  };
+
+  const handleSearch = (e) => {
+    e.preventDefault();
+    // Fetch travel options when user submits the search form
+    fetchTravelOptions(searchQuery, originCity);
   };
 
   return (
@@ -283,22 +338,50 @@ const Destinations = () => {
       {/* Search and Filters */}
       <div className="max-w-7xl mx-auto px-4 mb-8">
         <div className="bg-white rounded-lg shadow-md p-6">
-          <div className="mb-4">
-            <div className="relative">
-              <input
-                type="text"
-                placeholder="Search destinations by name, country, or keywords..."
-                value={searchQuery}
-                onChange={handleSearchChange}
-                className="w-full px-4 py-3 pl-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              />
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
+          <form onSubmit={handleSearch}>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div className="relative">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Origin (From)</label>
+                <input
+                  type="text"
+                  placeholder="Enter your departure city"
+                  value={originCity}
+                  onChange={handleOriginChange}
+                  className="w-full px-4 py-3 pl-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+                <div className="absolute bottom-0 left-0 pl-3 flex items-center pointer-events-none h-12">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                  </svg>
+                </div>
+              </div>
+              
+              <div className="relative">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Destination (To)</label>
+                <input
+                  type="text"
+                  placeholder="Search destinations by name, country, or keywords..."
+                  value={searchQuery}
+                  onChange={handleSearchChange}
+                  className="w-full px-4 py-3 pl-10 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+                <div className="absolute bottom-0 left-0 pl-3 flex items-center pointer-events-none h-12">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                </div>
               </div>
             </div>
-          </div>
+            
+            <div className="flex justify-end mb-6">
+              <button
+                type="submit"
+                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium"
+              >
+                Search Travel Options
+              </button>
+            </div>
+          </form>
           
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* Region Filter */}
@@ -345,6 +428,42 @@ const Destinations = () => {
           </div>
         </div>
       </div>
+      
+      {/* Travel Options Section */}
+      {(loadingTravelOptions || travelOptions.length > 0) && (
+        <div className="max-w-7xl mx-auto px-4 mb-16">
+          <h2 className="text-2xl font-bold text-gray-800 mb-6">
+            Travel Options {originCity ? `from ${originCity} to ${searchQuery}` : `for ${searchQuery}`}
+          </h2>
+          
+          {loadingTravelOptions ? (
+            <div className="flex justify-center items-center py-12">
+              <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+              <p className="ml-4 text-lg text-gray-600">Fetching travel options...</p>
+            </div>
+          ) : (
+            <div className="bg-white rounded-lg shadow-md p-6">
+              {travelOptions.length > 0 ? (
+                <div className="travel-options">
+                  {/* Import and use TravelOptions component here */}
+                  <TravelOptions 
+                    options={travelOptions} 
+                    loading={false} 
+                    error={null} 
+                    city={searchQuery} 
+                  />
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <p className="text-gray-600">
+                    No travel options found. Try different cities or check our recommended destinations below.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       
       {/* Results */}
       <div className="max-w-7xl mx-auto px-4 mb-16">
