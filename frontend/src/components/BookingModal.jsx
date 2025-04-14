@@ -229,7 +229,7 @@ const BookingModal = ({ item, type, isOpen, onClose }) => {
           phone: bookingDetails.phone
         },
         itemDetails: {
-          itemId: "static-id-123",
+          itemId: item?._id || `item-${Date.now()}`,
           name: getItemName() || 'Unknown Item',
           price: totalPrice.toString(),
           details: {}
@@ -251,10 +251,10 @@ const BookingModal = ({ item, type, isOpen, onClose }) => {
       // Add hotel details directly if hotel booking
       if (type === 'hotel') {
         bookingData.hotel = {
-          id: "hotel-" + Date.now(),
-          name: item.name || getItemName(),
+          id: item?._id || `hotel-${Date.now()}`,
+          name: item?.name || getItemName(),
           price: totalPrice,
-          image: item.image || ''
+          image: item?.mainImage || item?.image || ''
         };
       }
       

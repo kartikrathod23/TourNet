@@ -27,6 +27,8 @@ const MyBookings = () => {
     let localBookings = [];
     let hasApiError = false;
     
+    console.log('Starting fetchBookings with token:', token ? 'Valid token exists' : 'No token');
+    
     // Load any local bookings first
     try {
       const localBookingsData = JSON.parse(localStorage.getItem('myLocalBookings') || '[]');
@@ -56,20 +58,19 @@ const MyBookings = () => {
     
     // Try to fetch from API
     try {
-      console.log('Fetching bookings with token:', token);
+      console.log('Fetching bookings with token, API URL:', `${API_URL}/bookings/my-bookings`);
       
-      // Try to fetch from user document first (new method)
-      console.log('Fetching bookings from user document:', `${API_URL}/auth/user-bookings`);
-      const response = await axios.get(`${API_URL}/auth/user-bookings`, {
+      // Try to fetch from booking endpoints first (contains the most complete data)
+      const response = await axios.get(`${API_URL}/bookings/my-bookings`, {
         headers: {
           Authorization: `Bearer ${token}`
         }
       });
       
-      console.log('User bookings API response:', response.data);
+      console.log('Bookings API response:', response.data);
       
       if (response.data.success) {
-        console.log('Bookings found in user document:', response.data.data.length);
+        console.log('Server bookings found:', response.data.data.length);
         apiBookings = response.data.data;
         
         // Debug each booking's content
@@ -82,16 +83,16 @@ const MyBookings = () => {
           console.log(`- Item: ${booking.itemDetails?.name}`);
         });
       } else {
-        // If user-bookings fails, try the old endpoint
-        console.log('Falling back to traditional bookings endpoint');
-        const fallbackResponse = await axios.get(`${API_URL}/bookings/my-bookings`, {
+        // If my-bookings fails, try the user document endpoint
+        console.log('Falling back to user-bookings endpoint');
+        const fallbackResponse = await axios.get(`${API_URL}/auth/user-bookings`, {
           headers: {
             Authorization: `Bearer ${token}`
           }
         });
         
         if (fallbackResponse.data.success) {
-          console.log('Bookings found on server (fallback):', fallbackResponse.data.data.length);
+          console.log('Bookings found in user document:', fallbackResponse.data.data.length);
           apiBookings = fallbackResponse.data.data;
         } else {
           throw new Error(fallbackResponse.data.error || 'Failed to fetch bookings');
@@ -106,6 +107,8 @@ const MyBookings = () => {
         console.error('Error response details:', err.response.data);
         if (err.response.status === 401) {
           errorMsg = 'Your session has expired. Please log in again. Showing local bookings only.';
+          // Clear token if it's invalid
+          localStorage.removeItem('token');
         } else if (err.response.data && err.response.data.error) {
           errorMsg = err.response.data.error + ' Showing local bookings only.';
         }
@@ -172,6 +175,14 @@ const MyBookings = () => {
       });
       
       console.log('Final combined bookings:', allBookings.length);
+      
+      // Sort bookings by date (newest first)
+      allBookings.sort((a, b) => {
+        const dateA = new Date(a.createdAt || a.bookingDate || a.checkInDate || 0);
+        const dateB = new Date(b.createdAt || b.bookingDate || b.checkInDate || 0);
+        return dateB - dateA;
+      });
+      
       setBookings(allBookings);
       
       if (hasApiError && allBookings.length === 0) {

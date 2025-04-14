@@ -19,7 +19,37 @@ router.get('/my-bookings', protect, async (req, res) => {
     const bookings = await Booking.find({ user: req.user.id })
       .sort({ createdAt: -1 });
     
-    console.log(`Found ${bookings.length} bookings for user`);
+    console.log(`Found ${bookings.length} bookings for user ${req.user.id}`);
+    
+    // If no bookings found directly, try to get booking IDs from user document
+    if (bookings.length === 0) {
+      console.log('No direct bookings found, checking user document for booking references');
+      try {
+        const user = await User.findById(req.user.id);
+        if (user && user.bookings && user.bookings.length > 0) {
+          console.log(`Found ${user.bookings.length} booking references in user document`);
+          
+          // Try to fetch these bookings
+          const userBookings = await Booking.find({
+            _id: { $in: user.bookings }
+          }).sort({ createdAt: -1 });
+          
+          if (userBookings.length > 0) {
+            console.log(`Successfully retrieved ${userBookings.length} bookings from user references`);
+            
+            return res.status(200).json({
+              success: true,
+              count: userBookings.length,
+              data: userBookings
+            });
+          } else {
+            console.log('No bookings found from user references');
+          }
+        }
+      } catch (userErr) {
+        console.error('Error fetching user document:', userErr);
+      }
+    }
     
     // Log each booking ID for debugging
     bookings.forEach((booking, index) => {
@@ -704,7 +734,7 @@ router.post('/create-direct', protect, async (req, res) => {
 // @access  Private
 router.post('/simple-create', protect, async (req, res) => {
   try {
-    console.log('Received booking request:', req.body);
+    console.log('Received booking request:', JSON.stringify(req.body, null, 2));
     console.log('User from JWT:', req.user.id);
     
     // Extract the booking data
@@ -758,11 +788,23 @@ router.post('/simple-create', protect, async (req, res) => {
       bookingDate: new Date()
     };
     
-    console.log('Saving booking with data:', bookingData);
+    console.log('Saving booking with data:', JSON.stringify(bookingData, null, 2));
     
     // Create the booking
     const booking = await Booking.create(bookingData);
-    console.log('Booking created:', booking._id);
+    console.log('Booking created with ID:', booking._id);
+    
+    // Add booking ID to user's bookings array for easy lookups
+    try {
+      await User.findByIdAndUpdate(
+        req.user.id,
+        { $push: { bookings: booking._id } }
+      );
+      console.log(`Added booking ${booking._id} to user ${req.user.id}'s bookings array`);
+    } catch (userUpdateError) {
+      console.error('Error updating user bookings array:', userUpdateError);
+      // Continue - the booking was still created
+    }
     
     res.status(201).json({
       success: true,
