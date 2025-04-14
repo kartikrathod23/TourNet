@@ -344,4 +344,178 @@ router.put('/cancel-booking/:id', protect, async (req, res) => {
   }
 });
 
+// @desc    Update user profile
+// @route   PUT /api/auth/update-profile
+// @access  Private
+router.put('/update-profile', protect, async (req, res) => {
+  try {
+    const { fullName, phone, address, preferences } = req.body;
+    
+    // Find the user by ID
+    const user = await User.findById(req.user.id);
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+    
+    // Update fields if provided
+    if (fullName) user.fullName = fullName;
+    if (phone) user.phone = phone;
+    
+    // Update address if provided
+    if (address) {
+      user.address = {
+        ...user.address,
+        ...address
+      };
+    }
+    
+    // Update preferences if provided
+    if (preferences) {
+      user.preferences = {
+        ...user.preferences,
+        ...preferences
+      };
+    }
+    
+    // Save the updated user
+    const updatedUser = await user.save();
+    
+    // Return success with updated user data (excluding password)
+    res.status(200).json({
+      success: true,
+      data: {
+        _id: updatedUser._id,
+        fullName: updatedUser.fullName,
+        email: updatedUser.email,
+        phone: updatedUser.phone,
+        address: updatedUser.address,
+        preferences: updatedUser.preferences,
+        role: updatedUser.role
+      }
+    });
+  } catch (err) {
+    console.error('Error updating user profile:', err);
+    res.status(500).json({
+      success: false,
+      error: 'Server error while updating profile'
+    });
+  }
+});
+
+// @desc    Update user password
+// @route   PUT /api/auth/update-password
+// @access  Private
+router.put('/update-password', protect, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    
+    // Find the user by ID and include the password
+    const user = await User.findById(req.user.id).select('+password');
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+    
+    // Check if current password matches
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        error: 'Current password is incorrect'
+      });
+    }
+    
+    // Hash the new password
+    const salt = await bcrypt.genSalt(10);
+    user.password = await bcrypt.hash(newPassword, salt);
+    
+    // Save the user with the new password
+    await user.save();
+    
+    res.status(200).json({
+      success: true,
+      message: 'Password updated successfully'
+    });
+  } catch (err) {
+    console.error('Error updating password:', err);
+    res.status(500).json({
+      success: false,
+      error: 'Server error while updating password'
+    });
+  }
+});
+
+// @desc    Add money to wallet
+// @route   POST /api/auth/add-to-wallet
+// @access  Private
+router.post('/add-to-wallet', protect, async (req, res) => {
+  try {
+    const { amount } = req.body;
+    
+    // Validate amount
+    if (!amount || isNaN(amount) || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Please provide a valid amount'
+      });
+    }
+    
+    // Find the user by ID
+    const user = await User.findById(req.user.id);
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+    
+    // Initialize wallet if it doesn't exist
+    if (!user.wallet) {
+      user.wallet = {
+        balance: 0,
+        currency: 'INR',
+        transactions: []
+      };
+    }
+    
+    // Add amount to wallet balance
+    user.wallet.balance = (user.wallet.balance || 0) + parseFloat(amount);
+    
+    // Add transaction record
+    user.wallet.transactions = [
+      {
+        id: `t${Date.now()}`,
+        type: 'credit',
+        amount: parseFloat(amount),
+        date: new Date().toISOString().split('T')[0],
+        description: 'Added money to wallet'
+      },
+      ...(user.wallet.transactions || [])
+    ];
+    
+    // Save the updated user
+    await user.save();
+    
+    res.status(200).json({
+      success: true,
+      data: user.wallet
+    });
+  } catch (err) {
+    console.error('Error adding money to wallet:', err);
+    res.status(500).json({
+      success: false,
+      error: 'Server error while processing wallet transaction'
+    });
+  }
+});
+
 module.exports = router;

@@ -18,6 +18,25 @@ const HotelDashboard = () => {
   const [profileLoading, setProfileLoading] = useState(true);
   const [bookings, setBookings] = useState([]);
   const [bookingsLoading, setBookingsLoading] = useState(true);
+  const [newRoom, setNewRoom] = useState({
+    roomNumber: '',
+    roomType: 'single',
+    price: {
+      amount: 0,
+      currency: 'INR'
+    },
+    capacity: {
+      adults: 1,
+      children: 0
+    },
+    amenities: [],
+    description: '',
+    isAvailable: true,
+    isActive: true
+  });
+  const [addingRoom, setAddingRoom] = useState(false);
+  const [addRoomSuccess, setAddRoomSuccess] = useState(false);
+  const [addRoomError, setAddRoomError] = useState('');
   
   const navigate = useNavigate();
   
@@ -259,6 +278,88 @@ const HotelDashboard = () => {
     } catch (error) {
       console.error('Error updating booking status:', error);
       alert('Failed to update booking status. Please try again.');
+    }
+  };
+  
+  const handleRoomInputChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    
+    if (name.includes('.')) {
+      const [parent, child] = name.split('.');
+      setNewRoom(prev => ({
+        ...prev,
+        [parent]: {
+          ...prev[parent],
+          [child]: type === 'number' ? Number(value) : value
+        }
+      }));
+    } else if (type === 'checkbox') {
+      setNewRoom(prev => ({
+        ...prev,
+        [name]: checked
+      }));
+    } else if (name === 'amenities') {
+      // Handle amenities as an array
+      const amenitiesArray = value.split(',').map(item => item.trim());
+      setNewRoom(prev => ({
+        ...prev,
+        amenities: amenitiesArray
+      }));
+    } else {
+      setNewRoom(prev => ({
+        ...prev,
+        [name]: type === 'number' ? Number(value) : value
+      }));
+    }
+  };
+  
+  const handleAddRoom = async (e) => {
+    e.preventDefault();
+    setAddingRoom(true);
+    setAddRoomSuccess(false);
+    setAddRoomError('');
+    
+    try {
+      const token = localStorage.getItem('token');
+      
+      const response = await axios.post('http://localhost:5000/api/hotel-rooms', newRoom, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      if (response.data.success) {
+        // Reset form
+        setNewRoom({
+          roomNumber: '',
+          roomType: 'single',
+          price: {
+            amount: 0,
+            currency: 'INR'
+          },
+          capacity: {
+            adults: 1,
+            children: 0
+          },
+          amenities: [],
+          description: '',
+          isAvailable: true,
+          isActive: true
+        });
+        
+        // Show success message
+        setAddRoomSuccess(true);
+        
+        // Refresh rooms list
+        fetchRooms();
+        fetchStats();
+      }
+    } catch (error) {
+      console.error('Error adding room:', error);
+      setAddRoomError(error.response?.data?.error || 'Failed to add room. Please try again.');
+    } finally {
+      setAddingRoom(false);
     }
   };
   
@@ -575,56 +676,192 @@ const HotelDashboard = () => {
   
   const renderStats = () => {
     return (
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <div className="bg-white p-6 rounded-lg shadow">
-          <div className="flex items-center">
-            <div className="p-3 rounded-full bg-blue-100 text-blue-600 mr-4">
-              <FaHotel size={24} />
-            </div>
-            <div>
-              <p className="text-gray-500 text-sm">Total Rooms</p>
-              <p className="text-2xl font-bold">{stats.totalRooms}</p>
-            </div>
+      <div className="container mx-auto px-4 py-8 max-w-7xl">
+        {profileLoading ? (
+          <div className="flex justify-center items-center h-64">
+            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
           </div>
-        </div>
-        
-        <div className="bg-white p-6 rounded-lg shadow">
-          <div className="flex items-center">
-            <div className="p-3 rounded-full bg-green-100 text-green-600 mr-4">
-              <FaBed size={24} />
+        ) : (
+          <>
+            <header className="mb-8">
+              <h1 className="text-3xl font-bold text-gray-800 mb-2">
+                {hotelProfile?.name || 'Hotel'} Dashboard
+              </h1>
+              <p className="text-gray-600">
+                Manage your hotel, rooms, and bookings with ease.
+              </p>
+            </header>
+            
+            {renderVerificationStatus()}
+            
+            {/* Hotel Stats */}
+            <div className="mb-10">
+              <h2 className="text-2xl font-semibold mb-4 text-gray-800">Overview</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                {/* Total Rooms */}
+                <div className="bg-white rounded-xl shadow-md p-6 border border-gray-200 hover:shadow-lg transition-shadow">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="rounded-full p-3 bg-blue-100">
+                      <FaHotel className="text-blue-600 text-xl" />
+                    </div>
+                    <span className="text-3xl font-bold text-gray-800">{stats.totalRooms}</span>
+                  </div>
+                  <h3 className="text-lg font-medium text-gray-700">Total Rooms</h3>
+                  <p className="text-sm text-gray-500 mt-1">All rooms in your property</p>
+                </div>
+                
+                {/* Available Rooms */}
+                <div className="bg-white rounded-xl shadow-md p-6 border border-gray-200 hover:shadow-lg transition-shadow">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="rounded-full p-3 bg-green-100">
+                      <FaBed className="text-green-600 text-xl" />
+                    </div>
+                    <span className="text-3xl font-bold text-gray-800">{stats.availableRooms}</span>
+                  </div>
+                  <h3 className="text-lg font-medium text-gray-700">Available Rooms</h3>
+                  <p className="text-sm text-gray-500 mt-1">Rooms ready for booking</p>
+                </div>
+                
+                {/* Occupied Rooms */}
+                <div className="bg-white rounded-xl shadow-md p-6 border border-gray-200 hover:shadow-lg transition-shadow">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="rounded-full p-3 bg-yellow-100">
+                      <FaChartBar className="text-yellow-600 text-xl" />
+                    </div>
+                    <span className="text-3xl font-bold text-gray-800">{stats.occupiedRooms}</span>
+                  </div>
+                  <h3 className="text-lg font-medium text-gray-700">Occupied Rooms</h3>
+                  <p className="text-sm text-gray-500 mt-1">Currently booked rooms</p>
+                </div>
+                
+                {/* Total Revenue */}
+                <div className="bg-white rounded-xl shadow-md p-6 border border-gray-200 hover:shadow-lg transition-shadow">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="rounded-full p-3 bg-purple-100">
+                      <FaDollarSign className="text-purple-600 text-xl" />
+                    </div>
+                    <span className="text-3xl font-bold text-gray-800">₹{stats.revenue.toLocaleString()}</span>
+                  </div>
+                  <h3 className="text-lg font-medium text-gray-700">Total Revenue</h3>
+                  <p className="text-sm text-gray-500 mt-1">This month's earnings</p>
+                </div>
+              </div>
             </div>
-            <div>
-              <p className="text-gray-500 text-sm">Available Rooms</p>
-              <p className="text-2xl font-bold">{stats.availableRooms}</p>
+            
+            {/* Navigation Tabs */}
+            <div className="mb-6 border-b border-gray-200">
+              <nav className="flex space-x-8">
+                <button
+                  onClick={() => setActiveTab('myRooms')}
+                  className={`py-4 px-1 font-medium text-sm border-b-2 ${
+                    activeTab === 'myRooms'
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  My Rooms
+                </button>
+                <button
+                  onClick={() => setActiveTab('bookings')}
+                  className={`py-4 px-1 font-medium text-sm border-b-2 ${
+                    activeTab === 'bookings'
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  Bookings
+                </button>
+                <button
+                  onClick={() => setActiveTab('availability')}
+                  className={`py-4 px-1 font-medium text-sm border-b-2 ${
+                    activeTab === 'availability'
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  Room Availability
+                </button>
+                <button
+                  onClick={() => setActiveTab('addRoom')}
+                  className={`py-4 px-1 font-medium text-sm border-b-2 ${
+                    activeTab === 'addRoom'
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                  }`}
+                >
+                  Add New Room
+                </button>
+              </nav>
             </div>
-          </div>
-        </div>
-        
-        <div className="bg-white p-6 rounded-lg shadow">
-          <div className="flex items-center">
-            <div className="p-3 rounded-full bg-orange-100 text-orange-600 mr-4">
-              <FaChartBar size={24} />
-            </div>
-            <div>
-              <p className="text-gray-500 text-sm">Occupied Rooms</p>
-              <p className="text-2xl font-bold">{stats.occupiedRooms}</p>
-            </div>
-          </div>
-        </div>
-        
-        <div className="bg-white p-6 rounded-lg shadow">
-          <div className="flex items-center">
-            <div className="p-3 rounded-full bg-purple-100 text-purple-600 mr-4">
-              <FaDollarSign size={24} />
-            </div>
-            <div>
-              <p className="text-gray-500 text-sm">Revenue</p>
-              <p className="text-2xl font-bold">₹{stats.revenue.toLocaleString()}</p>
-            </div>
-          </div>
-        </div>
+            
+            {renderTabContent()}
+          </>
+        )}
       </div>
     );
+  };
+  
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 'myRooms':
+        return (
+          <div>
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-semibold">My Rooms</h2>
+              <button
+                onClick={() => setActiveTab('addRoom')}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md flex items-center"
+              >
+                <FaPlus className="mr-2" />
+                Add New Room
+              </button>
+            </div>
+            {renderRoomsList()}
+          </div>
+        );
+      case 'addRoom':
+        return (
+          <div>
+            <div className="mb-6">
+              <h2 className="text-xl font-semibold">Add New Room</h2>
+              <p className="text-gray-600">Fill in the details below to add a new room to your hotel.</p>
+            </div>
+            {renderAddRoomForm()}
+          </div>
+        );
+      case 'bookings':
+        return (
+          <div>
+            <h2 className="text-xl font-semibold mb-6">Manage Bookings</h2>
+            {renderBookingsList()}
+            <div className="mt-8">
+              <h3 className="text-lg font-medium mb-4">Room Availability Calendar</h3>
+              {renderCalendarView()}
+            </div>
+          </div>
+        );
+      case 'profile':
+        return (
+          <div>
+            <h2 className="text-xl font-semibold mb-6">Hotel Profile</h2>
+            {renderHotelProfile()}
+          </div>
+        );
+      case 'stats':
+        return (
+          <div>
+            <h2 className="text-xl font-semibold mb-6">Dashboard</h2>
+            {renderStats()}
+          </div>
+        );
+      default:
+        return (
+          <div>
+            <h2 className="text-xl font-semibold mb-6">My Rooms</h2>
+            {renderRoomsList()}
+          </div>
+        );
+    }
   };
   
   const renderHotelProfile = () => {
@@ -894,33 +1131,209 @@ const HotelDashboard = () => {
     );
   };
   
-  const renderTabContent = () => {
-    switch (activeTab) {
-      case 'stats':
-        return renderStats();
-      case 'myRooms':
-        return renderRoomsList();
-      case 'bookings':
-        return (
-          <div className="space-y-6">
-            {renderBookingsList()}
-            <div className="mt-8">
-              {renderCalendarView()}
+  const renderAddRoomForm = () => {
+    return (
+      <div className="bg-white rounded-lg shadow">
+        <div className="px-6 py-4 border-b border-gray-200">
+          <h3 className="text-lg font-medium text-gray-900">Add New Room</h3>
+        </div>
+        
+        <form onSubmit={handleAddRoom} className="p-6">
+          {addRoomSuccess && (
+            <div className="mb-4 bg-green-100 text-green-700 p-3 rounded">
+              <FaCheck className="inline mr-2" />
+              Room added successfully!
+            </div>
+          )}
+          
+          {addRoomError && (
+            <div className="mb-4 bg-red-100 text-red-700 p-3 rounded">
+              <FaExclamationTriangle className="inline mr-2" />
+              {addRoomError}
+            </div>
+          )}
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Room Number <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                name="roomNumber"
+                value={newRoom.roomNumber}
+                onChange={handleRoomInputChange}
+                required
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Room Type <span className="text-red-500">*</span>
+              </label>
+              <select
+                name="roomType"
+                value={newRoom.roomType}
+                onChange={handleRoomInputChange}
+                required
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+              >
+                <option value="single">Single Room</option>
+                <option value="double">Double Room</option>
+                <option value="twin">Twin Room</option>
+                <option value="suite">Suite</option>
+                <option value="deluxe">Deluxe Room</option>
+                <option value="family">Family Room</option>
+                <option value="presidential">Presidential Suite</option>
+              </select>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Price (per night) <span className="text-red-500">*</span>
+              </label>
+              <div className="flex">
+                <input
+                  type="number"
+                  name="price.amount"
+                  value={newRoom.price.amount}
+                  onChange={handleRoomInputChange}
+                  required
+                  min="0"
+                  className="w-2/3 px-3 py-2 border border-gray-300 rounded-l-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                />
+                <select
+                  name="price.currency"
+                  value={newRoom.price.currency}
+                  onChange={handleRoomInputChange}
+                  className="w-1/3 px-3 py-2 border border-gray-300 rounded-r-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="INR">INR</option>
+                  <option value="USD">USD</option>
+                  <option value="EUR">EUR</option>
+                </select>
+              </div>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Capacity <span className="text-red-500">*</span>
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Adults</label>
+                  <input
+                    type="number"
+                    name="capacity.adults"
+                    value={newRoom.capacity.adults}
+                    onChange={handleRoomInputChange}
+                    min="1"
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Children</label>
+                  <input
+                    type="number"
+                    name="capacity.children"
+                    value={newRoom.capacity.children}
+                    onChange={handleRoomInputChange}
+                    min="0"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+              </div>
+            </div>
+            
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Amenities (comma-separated)
+              </label>
+              <input
+                type="text"
+                name="amenities"
+                value={newRoom.amenities.join(', ')}
+                onChange={handleRoomInputChange}
+                placeholder="Wi-Fi, TV, Air Conditioning, etc."
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+              />
+            </div>
+            
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Description
+              </label>
+              <textarea
+                name="description"
+                value={newRoom.description}
+                onChange={handleRoomInputChange}
+                rows="3"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+              ></textarea>
+            </div>
+            
+            <div className="flex items-center">
+              <input
+                type="checkbox"
+                id="isAvailable"
+                name="isAvailable"
+                checked={newRoom.isAvailable}
+                onChange={handleRoomInputChange}
+                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+              />
+              <label htmlFor="isAvailable" className="ml-2 block text-sm text-gray-700">
+                Available for booking
+              </label>
+            </div>
+            
+            <div className="flex items-center">
+              <input
+                type="checkbox"
+                id="isActive"
+                name="isActive"
+                checked={newRoom.isActive}
+                onChange={handleRoomInputChange}
+                className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+              />
+              <label htmlFor="isActive" className="ml-2 block text-sm text-gray-700">
+                Active (visible to guests)
+              </label>
             </div>
           </div>
-        );
-      case 'profile':
-        return renderHotelProfile();
-      default:
-        return renderRoomsList();
-    }
+          
+          <div className="mt-6">
+            <button
+              type="submit"
+              disabled={addingRoom}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 flex items-center justify-center"
+            >
+              {addingRoom ? (
+                <>
+                  <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Adding Room...
+                </>
+              ) : (
+                <>
+                  <FaPlus className="mr-2" />
+                  Add Room
+                </>
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
+    );
   };
   
   return (
     <div className="min-h-screen bg-gray-100">
-      {/* Header */}
-      <header className="bg-white shadow">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
+      <header className="bg-white shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center">
             <h1 className="text-2xl font-bold text-gray-900">Hotel Dashboard</h1>
             <button
@@ -928,63 +1341,16 @@ const HotelDashboard = () => {
                 localStorage.removeItem('token');
                 navigate('/hotel/login');
               }}
-              className="text-red-600 hover:text-red-800"
+              className="text-sm text-red-600 hover:text-red-900"
             >
-              Sign Out
+              Logout
             </button>
           </div>
         </div>
       </header>
       
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-        {/* Verification Status Banner */}
-        {renderVerificationStatus()}
-        
-        {/* Stats */}
+      <main className="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
         {renderStats()}
-        
-        {/* Navigation Tabs */}
-        <div className="bg-white shadow rounded-lg mb-8">
-          <div className="flex border-b">
-            <button
-              className={`px-6 py-3 text-sm font-medium ${
-                activeTab === 'myRooms'
-                  ? 'text-blue-600 border-b-2 border-blue-600'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-              onClick={() => setActiveTab('myRooms')}
-            >
-              My Rooms
-            </button>
-            
-            <button
-              className={`px-6 py-3 text-sm font-medium ${
-                activeTab === 'bookings'
-                  ? 'text-blue-600 border-b-2 border-blue-600'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-              onClick={() => setActiveTab('bookings')}
-            >
-              Bookings
-            </button>
-            
-            <button
-              className={`px-6 py-3 text-sm font-medium ${
-                activeTab === 'profile'
-                  ? 'text-blue-600 border-b-2 border-blue-600'
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-              onClick={() => setActiveTab('profile')}
-            >
-              Hotel Profile
-            </button>
-          </div>
-        </div>
-        
-        {/* Tab Content */}
-        <div className="bg-white shadow rounded-lg p-6">
-          {renderTabContent()}
-        </div>
       </main>
     </div>
   );

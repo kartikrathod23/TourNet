@@ -101,11 +101,133 @@ async function getCityCoordinates(cityName) {
   }
 }
 
-// Get hotels using RapidAPI, Amadeus and MAKCORPS APIs
+// Function to get hotels using RapidAPI, Amadeus and MAKCORPS APIs
 async function getHotelsInArea(cityData) {
   try {
     console.log(`[Hotels] Searching for accommodations in: ${cityData.name}`);
     let hotels = [];
+    
+    // First try to get hotels from our own database
+    try {
+      console.log(`[Hotels] Searching our database for hotels in ${cityData.name}`);
+      const Hotel = require('../models/Hotel');
+      
+      // Get search terms from the query
+      const searchTerms = cityData.name.toLowerCase().split(/[\s,]+/).filter(term => term.length > 2);
+      console.log(`[Hotels] Search terms: ${searchTerms.join(', ')}`);
+      
+      // Find hotels that match any part of the address (more flexible search)
+      const query = {
+        $or: [
+          { 'address.city': { $regex: new RegExp(cityData.name, 'i') } }, // Exact city match
+          { name: { $regex: new RegExp(cityData.name, 'i') } } // Hotel name contains city
+        ]
+      };
+      
+      // Add more search terms if available
+      if (searchTerms.length > 0) {
+        // Add each search term as a possible match in city, state, or country
+        searchTerms.forEach(term => {
+          if (term.length > 2) { // Only use terms with more than 2 characters
+            query.$or.push({ 'address.city': { $regex: new RegExp(term, 'i') } });
+            query.$or.push({ 'address.state': { $regex: new RegExp(term, 'i') } });
+            query.$or.push({ 'address.country': { $regex: new RegExp(term, 'i') } });
+          }
+        });
+      }
+      
+      console.log('[Hotels] Query:', JSON.stringify(query));
+      const localHotels = await Hotel.find(query);
+      
+      if (localHotels && localHotels.length > 0) {
+        console.log(`[Hotels] Found ${localHotels.length} hotels in our database for ${cityData.name}`);
+        
+        // Convert our local hotels to the expected format
+        const mappedLocalHotels = localHotels.map(hotel => {
+          return {
+            id: hotel._id,
+            name: hotel.name,
+            highlighted_name: hotel.name,
+            address: `${hotel.address.street || ''}, ${hotel.address.city || ''}, ${hotel.address.postalCode || ''}`,
+            location: `${hotel.address.city || 'Unknown'}, ${hotel.address.country || 'Unknown'}`,
+            distance: Math.floor(Math.random() * 5000),
+            kinds: 'accommodations,hotels',
+            rating: hotel.starRating || 4,
+            coords: hotel.address.coordinates ? 
+              `${hotel.address.coordinates.lat}, ${hotel.address.coordinates.lon}` : 
+              `${cityData.lat}, ${cityData.lon}`,
+            description: hotel.description || 'Comfortable hotel with excellent amenities',
+            price: hotel.rooms && hotel.rooms.length > 0 ? 
+              hotel.rooms[0].price.amount : 
+              Math.floor(Math.random() * 200) + 80,
+            currency: hotel.rooms && hotel.rooms.length > 0 ? 
+              hotel.rooms[0].price.currency : 'INR',
+            images: hotel.images || [hotel.mainImage],
+            isVerified: hotel.verificationStatus === 'verified',
+            verificationStatus: hotel.verificationStatus,
+            source: 'local'
+          };
+        });
+        
+        // Add local hotels to the results
+        hotels = [...mappedLocalHotels];
+        
+        // If we have local hotels, we can return them immediately
+        // or continue to fetch more from external APIs
+        if (hotels.length > 0) {
+          console.log(`[Hotels] Returning ${hotels.length} local hotels`);
+          return hotels;
+        }
+      } else {
+        // Debug output if no hotels found
+        console.log(`[Hotels] No hotels found in database for ${cityData.name}`);
+        
+        // As a last resort, get all hotels from database
+        console.log('[Hotels] Fetching all hotels as fallback');
+        const allHotels = await Hotel.find({});
+        if (allHotels && allHotels.length > 0) {
+          console.log(`[Hotels] Found ${allHotels.length} total hotels in database`);
+          
+          // Return all hotels with a note about the search
+          const mappedAllHotels = allHotels.map(hotel => {
+            return {
+              id: hotel._id,
+              name: hotel.name,
+              highlighted_name: hotel.name,
+              address: `${hotel.address.street || ''}, ${hotel.address.city || ''}, ${hotel.address.postalCode || ''}`,
+              location: `${hotel.address.city || 'Unknown'}, ${hotel.address.country || 'Unknown'}`,
+              distance: Math.floor(Math.random() * 5000),
+              kinds: 'accommodations,hotels',
+              rating: hotel.starRating || 4,
+              coords: hotel.address.coordinates ? 
+                `${hotel.address.coordinates.lat}, ${hotel.address.coordinates.lon}` : 
+                `${cityData.lat}, ${cityData.lon}`,
+              description: hotel.description || 'Comfortable hotel with excellent amenities',
+              price: hotel.rooms && hotel.rooms.length > 0 ? 
+                hotel.rooms[0].price.amount : 
+                Math.floor(Math.random() * 200) + 80,
+              currency: hotel.rooms && hotel.rooms.length > 0 ? 
+                hotel.rooms[0].price.currency : 'INR',
+              images: hotel.images || [hotel.mainImage],
+              isVerified: hotel.verificationStatus === 'verified',
+              verificationStatus: hotel.verificationStatus,
+              source: 'local'
+            };
+          });
+          
+          // Add all hotels to the results
+          hotels = [...mappedAllHotels];
+          
+          if (hotels.length > 0) {
+            console.log(`[Hotels] Returning all ${hotels.length} hotels from database as fallback`);
+            return hotels;
+          }
+        }
+      }
+    } catch (dbError) {
+      console.error('[Hotels] Error searching local database:', dbError.message);
+      // Continue with external APIs if database search fails
+    }
     
     // Try RapidAPI Hotels first (if API key is available)
     const RAPIDAPI_KEY = process.env.RAPIDAPI_KEY;

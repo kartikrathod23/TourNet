@@ -304,7 +304,7 @@ const Dashboard = () => {
                 )}
             </section>
 
-            {/* Activities Section (retained from original) */}
+            {/* Activities Section (retained from original)
             <section className="px-6 md:px-12 py-8 bg-gray-100">
                 <h3 className="text-2xl font-semibold text-gray-800 mb-6">🌍 Popular Activities</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -321,7 +321,7 @@ const Dashboard = () => {
                         </p>
                     )}
                 </div>
-            </section>
+            </section> */}
 
             {/* CTA Button */}
             <section className="text-center py-12">

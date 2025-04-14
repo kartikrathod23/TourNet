@@ -96,6 +96,44 @@ const bookingSchema = new mongoose.Schema({
   }
 }, { _id: true });
 
+// Transaction schema for wallet
+const transactionSchema = new mongoose.Schema({
+  id: {
+    type: String,
+    required: true,
+    unique: true
+  },
+  type: {
+    type: String,
+    enum: ['credit', 'debit'],
+    required: true
+  },
+  amount: {
+    type: Number,
+    required: true
+  },
+  date: {
+    type: Date,
+    default: Date.now
+  },
+  description: {
+    type: String
+  }
+});
+
+// Wallet schema
+const walletSchema = new mongoose.Schema({
+  balance: {
+    type: Number,
+    default: 0
+  },
+  currency: {
+    type: String,
+    default: 'INR'
+  },
+  transactions: [transactionSchema]
+});
+
 const UserSchema = new mongoose.Schema({
   fullName: {
     type: String,
@@ -162,6 +200,8 @@ const UserSchema = new mongoose.Schema({
   },
   // Bookings made by the user
   bookings: [bookingSchema],
+  // Wallet for user transactions
+  wallet: walletSchema,
   // Agent specific details
   agencyDetails: {
     name: {
