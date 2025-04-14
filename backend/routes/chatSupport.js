@@ -9,7 +9,8 @@ dotenv.config();
 const chatSessions = new Map();
 
 // Gemini API endpoint
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent';
+// const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta3/models/gemini-pro:generateContent';
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-1.5-pro:generateContent';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'YOUR_GEMINI_API_KEY'; // Replace with your actual API key
 
 // Verify API key on startup

@@ -19,6 +19,13 @@ import { useEffect, useState } from 'react';
 import HotelLogin from './pages/HotelLogin';
 import HotelRegister from './pages/HotelRegister';
 import HotelDashboard from './pages/HotelDashboard';
+import axios from 'axios';
+
+// Global API configuration
+export const API_URL = 'http://localhost:5000/api';
+
+// Configure axios defaults
+axios.defaults.baseURL = API_URL;
 
 // Protected route component
 const ProtectedRoute = ({ children }) => {
@@ -36,6 +43,17 @@ const AgentRoute = ({ children }) => {
   
   if (!token || userType !== 'agent') {
     return <Navigate to="/login" />;
+  }
+  return children;
+};
+
+// Hotel route component - only accessible by hotels
+const HotelRoute = ({ children }) => {
+  const token = localStorage.getItem('token');
+  const userType = localStorage.getItem('userType');
+  
+  if (!token || userType !== 'hotel') {
+    return <Navigate to="/hotel/login" />;
   }
   return children;
 };
@@ -102,7 +120,7 @@ function App() {
         {/* Hotel routes */}
         <Route path="/hotel/login" element={<HotelLogin />} />
         <Route path="/hotel/register" element={<HotelRegister />} />
-        <Route path="/hotel/dashboard" element={<HotelDashboard />} />
+        <Route path="/hotel/dashboard" element={<HotelRoute><HotelDashboard /></HotelRoute>} />
       </Routes>
       
       {/* Chat Support Widget - Available on all pages */}

@@ -108,7 +108,7 @@ const HotelDashboard = () => {
       setBookingsLoading(true);
       
       // In a real application, you would fetch actual booking data
-      // For now, we'll use mock data
+      // For now, we'll use mock data with more diverse statuses
       
       // Mock booking data
       const mockBookings = [
@@ -121,7 +121,9 @@ const HotelDashboard = () => {
           checkOutDate: '2023-10-20',
           totalAmount: 25000,
           status: 'confirmed',
-          numberOfGuests: 2
+          numberOfGuests: 2,
+          paymentStatus: 'paid',
+          specialRequests: 'Early check-in requested'
         },
         {
           _id: 'b2',
@@ -132,7 +134,48 @@ const HotelDashboard = () => {
           checkOutDate: '2023-10-25',
           totalAmount: 42000,
           status: 'pending',
-          numberOfGuests: 3
+          numberOfGuests: 3,
+          paymentStatus: 'partial',
+          specialRequests: 'Extra bed needed'
+        },
+        {
+          _id: 'b3',
+          roomNumber: '310',
+          roomType: 'Single',
+          guestName: 'David Chen',
+          checkInDate: '2023-10-12',
+          checkOutDate: '2023-10-14',
+          totalAmount: 12000,
+          status: 'completed',
+          numberOfGuests: 1,
+          paymentStatus: 'paid',
+          specialRequests: ''
+        },
+        {
+          _id: 'b4',
+          roomNumber: '402',
+          roomType: 'Family Suite',
+          guestName: 'Priya Sharma',
+          checkInDate: '2023-10-20',
+          checkOutDate: '2023-10-26',
+          totalAmount: 55000,
+          status: 'pending',
+          numberOfGuests: 4,
+          paymentStatus: 'unpaid',
+          specialRequests: 'Airport pickup required'
+        },
+        {
+          _id: 'b5',
+          roomNumber: '150',
+          roomType: 'Deluxe',
+          guestName: 'Michael Johnson',
+          checkInDate: '2023-10-22',
+          checkOutDate: '2023-10-24',
+          totalAmount: 18000,
+          status: 'cancelled',
+          numberOfGuests: 2,
+          paymentStatus: 'refunded',
+          specialRequests: ''
         }
       ];
       
@@ -373,88 +416,159 @@ const HotelDashboard = () => {
 
   const renderBookingsList = () => {
     if (bookingsLoading) {
-      return <div className="text-center py-4">Loading bookings...</div>;
-    }
-    
-    if (bookings.length === 0) {
       return (
-        <div className="text-center py-8 bg-gray-50 rounded-lg">
-          <p className="text-gray-600">You don't have any bookings yet.</p>
-          <p className="text-gray-600 mt-2">Once guests book your rooms, they will appear here.</p>
+        <div className="py-20 text-center">
+          <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-blue-500 border-opacity-50 mx-auto mb-4"></div>
+          <p>Loading bookings...</p>
         </div>
       );
     }
-    
+
+    if (bookings.length === 0) {
+      return (
+        <div className="text-center py-10">
+          <FaExclamationTriangle className="mx-auto text-4xl text-yellow-500 mb-4" />
+          <h3 className="text-xl font-semibold mb-2">No Bookings Found</h3>
+          <p className="text-gray-600">You don't have any bookings yet.</p>
+        </div>
+      );
+    }
+
+    const getStatusBadgeClass = (status) => {
+      switch (status) {
+        case 'confirmed':
+          return 'bg-green-100 text-green-800';
+        case 'pending':
+          return 'bg-yellow-100 text-yellow-800';
+        case 'cancelled':
+          return 'bg-red-100 text-red-800';
+        case 'completed':
+          return 'bg-blue-100 text-blue-800';
+        default:
+          return 'bg-gray-100 text-gray-800';
+      }
+    };
+
+    const getPaymentStatusBadgeClass = (status) => {
+      switch (status) {
+        case 'paid':
+          return 'bg-green-100 text-green-800';
+        case 'partial':
+          return 'bg-yellow-100 text-yellow-800';
+        case 'unpaid':
+          return 'bg-red-100 text-red-800';
+        case 'refunded':
+          return 'bg-gray-100 text-gray-800';
+        default:
+          return 'bg-gray-100 text-gray-800';
+      }
+    };
+
     return (
       <div className="overflow-x-auto">
-        <table className="min-w-full bg-white">
-          <thead className="bg-gray-100">
-            <tr>
-              <th className="py-3 px-4 text-left">Room</th>
-              <th className="py-3 px-4 text-left">Guest</th>
-              <th className="py-3 px-4 text-left">Check-in</th>
-              <th className="py-3 px-4 text-left">Check-out</th>
-              <th className="py-3 px-4 text-left">Amount</th>
-              <th className="py-3 px-4 text-left">Status</th>
-              <th className="py-3 px-4 text-left">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200">
-            {bookings.map(booking => (
-              <tr key={booking._id} className="hover:bg-gray-50">
-                <td className="py-3 px-4">
-                  <div className="font-medium">{booking.roomNumber}</div>
-                  <div className="text-xs text-gray-500">{booking.roomType}</div>
-                </td>
-                <td className="py-3 px-4">
-                  {booking.guestName}
-                  <div className="text-xs text-gray-500">{booking.numberOfGuests} guests</div>
-                </td>
-                <td className="py-3 px-4">
-                  {new Date(booking.checkInDate).toLocaleDateString()}
-                </td>
-                <td className="py-3 px-4">
-                  {new Date(booking.checkOutDate).toLocaleDateString()}
-                </td>
-                <td className="py-3 px-4 font-medium">
-                  ₹{booking.totalAmount.toLocaleString()}
-                </td>
-                <td className="py-3 px-4">
-                  <span className={`inline-block rounded-full px-3 py-1 text-sm font-semibold 
-                    ${booking.status === 'confirmed' 
-                      ? 'bg-green-100 text-green-800' 
-                      : booking.status === 'pending'
-                        ? 'bg-yellow-100 text-yellow-800'
-                        : booking.status === 'cancelled'
-                          ? 'bg-red-100 text-red-800'
-                          : 'bg-gray-100 text-gray-800'}`}
-                  >
-                    {booking.status.charAt(0).toUpperCase() + booking.status.slice(1)}
-                  </span>
-                </td>
-                <td className="py-3 px-4">
-                  <div className="flex space-x-2">
+        <div className="mb-4 flex justify-between items-center">
+          <h3 className="text-xl font-semibold">Booking Requests</h3>
+          <div className="flex space-x-2">
+            <button 
+              className="px-4 py-2 bg-white border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+              onClick={() => fetchBookings()}
+            >
+              Refresh
+            </button>
+            <select 
+              className="bg-white border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 px-4 py-2"
+              onChange={(e) => console.log('Filter by:', e.target.value)}
+            >
+              <option value="all">All Bookings</option>
+              <option value="pending">Pending</option>
+              <option value="confirmed">Confirmed</option>
+              <option value="completed">Completed</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </div>
+        </div>
+        
+        <div className="bg-white shadow-md rounded-lg overflow-hidden">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Booking Details</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Guest</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Room</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Dates</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {bookings.map((booking) => (
+                <tr key={booking._id} className="hover:bg-gray-50">
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="font-medium text-gray-900">#{booking._id.slice(-4)}</div>
+                    <div className="text-sm text-gray-500">
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getPaymentStatusBadgeClass(booking.paymentStatus)}`}>
+                        {booking.paymentStatus.charAt(0).toUpperCase() + booking.paymentStatus.slice(1)}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm font-medium text-gray-900">{booking.guestName}</div>
+                    <div className="text-sm text-gray-500">Guests: {booking.numberOfGuests}</div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-900">Room {booking.roomNumber}</div>
+                    <div className="text-sm text-gray-500">{booking.roomType}</div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="text-sm text-gray-900">{new Date(booking.checkInDate).toLocaleDateString()}</div>
+                    <div className="text-sm text-gray-500">to {new Date(booking.checkOutDate).toLocaleDateString()}</div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    ₹{booking.totalAmount.toLocaleString()}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusBadgeClass(booking.status)}`}>
+                      {booking.status.charAt(0).toUpperCase() + booking.status.slice(1)}
+                    </span>
+                    {booking.specialRequests && (
+                      <div className="mt-1 text-xs text-gray-500 italic">
+                        Note: {booking.specialRequests}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                    {booking.status === 'pending' && (
+                      <div className="flex space-x-2">
+                        <button
+                          onClick={() => handleUpdateBookingStatus(booking._id, 'confirmed')}
+                          className="text-green-600 hover:text-green-900 rounded-md px-2 py-1 bg-green-50 hover:bg-green-100"
+                          title="Approve Booking"
+                        >
+                          <FaCheck />
+                        </button>
+                        <button
+                          onClick={() => handleUpdateBookingStatus(booking._id, 'cancelled')}
+                          className="text-red-600 hover:text-red-900 rounded-md px-2 py-1 bg-red-50 hover:bg-red-100"
+                          title="Reject Booking"
+                        >
+                          <FaTrash />
+                        </button>
+                      </div>
+                    )}
                     <button
-                      onClick={() => handleUpdateBookingStatus(booking._id, 'confirmed')}
-                      disabled={booking.status === 'confirmed'}
-                      className={`text-green-600 hover:text-green-900 ${booking.status === 'confirmed' ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      title="Confirm"
-                    >
-                      <FaCheck />
-                    </button>
-                    <Link 
-                      to={`/hotel/booking-details/${booking._id}`} 
-                      className="text-blue-600 hover:text-blue-900"
-                      title="View Details"
+                      onClick={() => alert(`View details for booking #${booking._id}`)}
+                      className="text-blue-600 hover:text-blue-900 rounded-md px-2 py-1 bg-blue-50 hover:bg-blue-100"
+                      title="View Booking Details"
                     >
                       <FaEye />
-                    </Link>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     );
   };
@@ -632,42 +746,173 @@ const HotelDashboard = () => {
     );
   };
   
+  const renderCalendarView = () => {
+    // Get current date and create a calendar for the current month
+    const today = new Date();
+    const currentMonth = today.getMonth();
+    const currentYear = today.getFullYear();
+    
+    // Create a calendar grid
+    const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+    const firstDayOfMonth = new Date(currentYear, currentMonth, 1).getDay();
+    
+    const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+    const calendarDays = Array(firstDayOfMonth).fill(null).concat(days);
+    
+    // Group into weeks
+    const weeks = [];
+    for (let i = 0; i < calendarDays.length; i += 7) {
+      weeks.push(calendarDays.slice(i, i + 7));
+    }
+    
+    // Fill the last week if needed
+    const lastWeek = weeks[weeks.length - 1];
+    if (lastWeek.length < 7) {
+      weeks[weeks.length - 1] = lastWeek.concat(Array(7 - lastWeek.length).fill(null));
+    }
+    
+    // Find which days have bookings (simplified for demo)
+    const bookedDays = bookings.reduce((acc, booking) => {
+      const checkIn = new Date(booking.checkInDate);
+      const checkOut = new Date(booking.checkOutDate);
+      
+      // Only consider days in the current month
+      if (checkIn.getMonth() === currentMonth || checkOut.getMonth() === currentMonth) {
+        // Get all dates between check-in and check-out
+        const dates = [];
+        const currentDate = new Date(checkIn);
+        
+        while (currentDate <= checkOut) {
+          if (currentDate.getMonth() === currentMonth) {
+            dates.push(currentDate.getDate());
+          }
+          currentDate.setDate(currentDate.getDate() + 1);
+        }
+        
+        // Add to accumulator with booking status
+        dates.forEach(date => {
+          if (!acc[date]) acc[date] = [];
+          acc[date].push({
+            id: booking._id,
+            status: booking.status,
+            room: booking.roomNumber
+          });
+        });
+      }
+      
+      return acc;
+    }, {});
+    
+    const monthNames = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+    
+    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    
+    const getDayClass = (day) => {
+      if (!day) return 'opacity-0';
+      
+      const isToday = day === today.getDate() && currentMonth === today.getMonth();
+      let classes = 'relative flex flex-col items-center justify-center h-12 rounded-lg ';
+      
+      if (isToday) {
+        classes += 'border-2 border-blue-500 font-bold ';
+      }
+      
+      if (bookedDays[day]) {
+        const hasConfirmed = bookedDays[day].some(b => b.status === 'confirmed');
+        const hasPending = bookedDays[day].some(b => b.status === 'pending');
+        
+        if (hasConfirmed) {
+          classes += 'bg-green-100 hover:bg-green-200 ';
+        } else if (hasPending) {
+          classes += 'bg-yellow-100 hover:bg-yellow-200 ';
+        }
+      } else {
+        classes += 'bg-white hover:bg-gray-100 ';
+      }
+      
+      return classes;
+    };
+    
+    return (
+      <div className="bg-white shadow-md rounded-lg p-6">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-xl font-semibold">Room Availability Calendar</h3>
+          <div className="text-lg font-medium">
+            {monthNames[currentMonth]} {currentYear}
+          </div>
+        </div>
+        
+        <div className="grid grid-cols-7 gap-1 mb-2">
+          {dayNames.map(day => (
+            <div key={day} className="text-center text-gray-500 text-sm font-medium">
+              {day}
+            </div>
+          ))}
+        </div>
+        
+        <div className="grid grid-cols-7 gap-1">
+          {weeks.flat().map((day, i) => (
+            <div 
+              key={i} 
+              className={getDayClass(day)}
+              onClick={() => day && alert(`Manage bookings for ${monthNames[currentMonth]} ${day}, ${currentYear}`)}
+            >
+              {day && (
+                <>
+                  <span className="text-sm">{day}</span>
+                  {bookedDays[day] && (
+                    <div className="absolute bottom-1 flex space-x-0.5">
+                      {bookedDays[day].length > 0 && (
+                        <span className="h-1.5 w-1.5 rounded-full bg-gray-800"></span>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+        
+        <div className="mt-4 flex items-center justify-center space-x-4 text-sm">
+          <div className="flex items-center">
+            <div className="h-3 w-3 bg-green-100 rounded-full mr-1"></div>
+            <span>Confirmed</span>
+          </div>
+          <div className="flex items-center">
+            <div className="h-3 w-3 bg-yellow-100 rounded-full mr-1"></div>
+            <span>Pending</span>
+          </div>
+          <div className="flex items-center">
+            <div className="h-3 w-3 border border-blue-500 rounded-full mr-1"></div>
+            <span>Today</span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+  
   const renderTabContent = () => {
     switch (activeTab) {
+      case 'stats':
+        return renderStats();
       case 'myRooms':
-        return (
-          <div>
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold">My Rooms</h2>
-              <Link 
-                to="/hotel/add-room" 
-                className="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded flex items-center"
-              >
-                <FaPlus className="mr-2" /> Add New Room
-              </Link>
-            </div>
-            {renderRoomsList()}
-          </div>
-        );
-      
+        return renderRoomsList();
       case 'bookings':
         return (
-          <div>
-            <h2 className="text-2xl font-bold mb-6">Bookings</h2>
+          <div className="space-y-6">
             {renderBookingsList()}
+            <div className="mt-8">
+              {renderCalendarView()}
+            </div>
           </div>
         );
-      
       case 'profile':
-        return (
-          <div>
-            <h2 className="text-2xl font-bold mb-6">Hotel Profile</h2>
-            {renderHotelProfile()}
-          </div>
-        );
-      
+        return renderHotelProfile();
       default:
-        return null;
+        return renderRoomsList();
     }
   };
   

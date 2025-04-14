@@ -151,22 +151,6 @@ const HotelSchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
-  averageRating: {
-    type: Number,
-    min: [1, 'Rating must be at least 1'],
-    max: [5, 'Rating cannot be more than 5'],
-    default: 0
-  },
-  reviewCount: {
-    type: Number,
-    default: 0
-  },
-  reviews: [
-    {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Review'
-    }
-  ],
   resetPasswordToken: String,
   resetPasswordExpire: Date,
   lastLogin: Date

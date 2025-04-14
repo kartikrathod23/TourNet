@@ -437,4 +437,88 @@ router.get('/search', async (req, res) => {
   }
 });
 
+// @desc    Get available rooms for a hotel based on dates
+// @route   GET /api/hotels/:id/available-rooms
+// @access  Public
+router.get('/:id/available-rooms', async (req, res) => {
+  try {
+    const hotelId = req.params.id;
+    const { checkInDate, checkOutDate } = req.query;
+    
+    if (!checkInDate || !checkOutDate) {
+      return res.status(400).json({
+        success: false,
+        error: 'Check-in and check-out dates are required'
+      });
+    }
+    
+    const start = new Date(checkInDate);
+    const end = new Date(checkOutDate);
+    
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid date format'
+      });
+    }
+    
+    if (start >= end) {
+      return res.status(400).json({
+        success: false,
+        error: 'Check-out date must be after check-in date'
+      });
+    }
+    
+    const hotel = await Hotel.findById(hotelId);
+    
+    if (!hotel) {
+      return res.status(404).json({
+        success: false,
+        error: 'Hotel not found'
+      });
+    }
+    
+    // Filter rooms by availability
+    const availableRooms = hotel.rooms.filter(room => {
+      // Room must be active and generally available
+      if (!room.isActive || !room.isAvailable) {
+        return false;
+      }
+      
+      // Check specific date availability
+      if (room.availability && room.availability.length > 0) {
+        // Generate dates array to check
+        const datesToCheck = [];
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+          datesToCheck.push(new Date(d).toDateString());
+        }
+        
+        // Check if any of the dates are unavailable
+        const hasUnavailableDate = room.availability.some(a => {
+          const availabilityDate = new Date(a.date).toDateString();
+          return datesToCheck.includes(availabilityDate) && !a.isAvailable;
+        });
+        
+        if (hasUnavailableDate) {
+          return false;
+        }
+      }
+      
+      return true;
+    });
+    
+    res.status(200).json({
+      success: true,
+      count: availableRooms.length,
+      data: availableRooms
+    });
+  } catch (err) {
+    console.error('Get available rooms error:', err);
+    res.status(500).json({
+      success: false,
+      error: 'Server error while fetching available rooms'
+    });
+  }
+});
+
 module.exports = router;

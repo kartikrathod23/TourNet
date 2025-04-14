@@ -207,7 +207,7 @@ const Dashboard = () => {
                 />
             </section>
 
-            {/* Tour Packages Section */}
+            {/* Tour Packages Section
             <section className="px-6 md:px-12 py-8">
                 <h3 className="text-2xl font-semibold text-gray-800 mb-6">
                     🏝️ Available Tour Packages 
@@ -256,7 +256,7 @@ const Dashboard = () => {
                         {loading ? 'Loading tour packages...' : 'No tour packages available for this location.'}
                     </p>
                 )}
-            </section>
+            </section> */}
 
             {/* Hotels Section */}
             <section className="px-6 md:px-12 py-8 bg-gray-100">

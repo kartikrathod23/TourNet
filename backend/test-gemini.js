@@ -10,7 +10,8 @@ const dotenv = require('dotenv');
 dotenv.config();
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent';
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent';
+
 
 // Verify API key format
 if (!GEMINI_API_KEY || !GEMINI_API_KEY.startsWith('AIza')) {

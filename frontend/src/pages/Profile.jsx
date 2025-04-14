@@ -8,6 +8,8 @@ const Profile = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState('profile');
+  const [walletAmount, setWalletAmount] = useState('');
+  const [isProcessingWallet, setIsProcessingWallet] = useState(false);
   
   // Edit mode state
   const [isEditing, setIsEditing] = useState(false);
@@ -58,12 +60,12 @@ const Profile = () => {
       // Mock user data
       const mockUserData = {
         id: '123456',
-        fullName: 'Alex Johnson',
-        email: 'alex.johnson@example.com',
-        phone: '+1 (555) 123-4567',
-        address: '123 Traveler Street',
-        city: 'San Francisco',
-        country: 'United States',
+        fullName: 'Arjun Sharma',
+        email: 'arjun.sharma@gmail.com',
+        phone: '+91 9876543210',
+        address: '42, Rajaji Nagar, 2nd Block',
+        city: 'Bengaluru',
+        country: 'India',
         profileImage: 'https://randomuser.me/api/portraits/men/44.jpg',
         preferences: {
           travelStyle: 'adventure',
@@ -76,7 +78,17 @@ const Profile = () => {
           reviewsSubmitted: 5,
           pointsEarned: 3450
         },
-        memberSince: '2022-05-15'
+        memberSince: '2022-05-15',
+        wallet: {
+          balance: 15000,
+          currency: 'INR',
+          transactions: [
+            { id: 't1', type: 'credit', amount: 5000, date: '2023-11-15', description: 'Added money via UPI' },
+            { id: 't2', type: 'debit', amount: 3500, date: '2023-11-20', description: 'Hotel booking in Goa' },
+            { id: 't3', type: 'credit', amount: 1000, date: '2023-12-01', description: 'Cashback from HDFC offer' },
+            { id: 't4', type: 'credit', amount: 12500, date: '2023-12-15', description: 'Added money via Net Banking' }
+          ]
+        }
       };
       
       setUser(mockUserData);
@@ -225,6 +237,54 @@ const Profile = () => {
     });
   };
   
+  const handleAddMoneyToWallet = async (e) => {
+    e.preventDefault();
+    setIsProcessingWallet(true);
+    setError('');
+    setSuccessMessage('');
+    
+    // Validate amount
+    const amount = parseFloat(walletAmount);
+    if (isNaN(amount) || amount <= 0) {
+      setError('Please enter a valid amount');
+      setIsProcessingWallet(false);
+      return;
+    }
+    
+    try {
+      // Simulate API call
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      // Update user wallet balance
+      const updatedUser = {
+        ...user,
+        wallet: {
+          ...user.wallet,
+          balance: user.wallet.balance + amount,
+          transactions: [
+            {
+              id: `t${Date.now()}`,
+              type: 'credit',
+              amount: amount,
+              date: new Date().toISOString().split('T')[0],
+              description: 'Added money'
+            },
+            ...user.wallet.transactions
+          ]
+        }
+      };
+      
+      setUser(updatedUser);
+      setWalletAmount('');
+      setSuccessMessage(`₹${amount} successfully added to your wallet!`);
+    } catch (err) {
+      console.error('Error adding money to wallet:', err);
+      setError('Failed to process wallet transaction. Please try again.');
+    } finally {
+      setIsProcessingWallet(false);
+    }
+  };
+  
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="pt-24 pb-16">
@@ -360,6 +420,14 @@ const Profile = () => {
                     Profile Details
                   </button>
                   <button
+                    className={`py-4 px-1 font-medium ${activeTab === 'wallet' 
+                      ? 'text-blue-600 border-b-2 border-blue-600' 
+                      : 'text-gray-500 hover:text-gray-700'}`}
+                    onClick={() => setActiveTab('wallet')}
+                  >
+                    Wallet
+                  </button>
+                  <button
                     className={`py-4 px-1 font-medium ${activeTab === 'security' 
                       ? 'text-blue-600 border-b-2 border-blue-600' 
                       : 'text-gray-500 hover:text-gray-700'}`}
@@ -480,6 +548,90 @@ const Profile = () => {
                       </div>
                     </div>
                   </form>
+                )}
+                
+                {activeTab === 'wallet' && (
+                  <div>
+                    <div className="mb-8">
+                      <h3 className="text-lg font-semibold mb-4">Wallet Balance</h3>
+                      <div className="flex items-center">
+                        <div className="p-6 bg-gradient-to-r from-green-500 to-emerald-600 rounded-xl text-white">
+                          <div className="text-lg opacity-80">Available Balance</div>
+                          <div className="text-3xl font-bold mt-1">₹{user.wallet.balance.toLocaleString()}</div>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div className="mb-8">
+                      <h3 className="text-lg font-semibold mb-4">Add Money to Wallet</h3>
+                      <form onSubmit={handleAddMoneyToWallet} className="max-w-md">
+                        <div className="flex space-x-4">
+                          <div className="flex-grow">
+                            <div className="relative">
+                              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                <span className="text-gray-500">₹</span>
+                              </div>
+                              <input
+                                type="number"
+                                value={walletAmount}
+                                onChange={(e) => setWalletAmount(e.target.value)}
+                                placeholder="Enter amount"
+                                className="w-full pl-8 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                min="1"
+                                step="1"
+                                required
+                              />
+                            </div>
+                          </div>
+                          <button
+                            type="submit"
+                            disabled={isProcessingWallet}
+                            className={`px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg shadow-sm transition ${
+                              isProcessingWallet ? 'opacity-70 cursor-not-allowed' : ''
+                            }`}
+                          >
+                            {isProcessingWallet ? 'Processing...' : 'Add Money'}
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+                    
+                    <div>
+                      <h3 className="text-lg font-semibold mb-4">Recent Transactions</h3>
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                            </tr>
+                          </thead>
+                          <tbody className="bg-white divide-y divide-gray-200">
+                            {user.wallet.transactions.map(transaction => (
+                              <tr key={transaction.id}>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDate(transaction.date)}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{transaction.description}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                  ₹{transaction.amount.toLocaleString()}
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap">
+                                  <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                                    transaction.type === 'credit' 
+                                      ? 'bg-green-100 text-green-800' 
+                                      : 'bg-red-100 text-red-800'
+                                  }`}>
+                                    {transaction.type === 'credit' ? 'Credit' : 'Debit'}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
                 )}
                 
                 {activeTab === 'security' && (

@@ -3,6 +3,99 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 
+// Booking schema to be embedded in the User schema
+const bookingSchema = new mongoose.Schema({
+  confirmationNumber: {
+    type: String,
+    unique: true
+  },
+  bookingType: {
+    type: String,
+    enum: ['hotel', 'package', 'travel', 'flight', 'bus', 'car_rental'],
+    default: 'hotel'
+  },
+  itemDetails: {
+    itemId: String,
+    name: String,
+    price: String,
+    details: {
+      type: mongoose.Schema.Types.Mixed
+    }
+  },
+  status: {
+    type: String,
+    enum: ['pending', 'confirmed', 'cancelled', 'completed'],
+    default: 'confirmed'
+  },
+  totalAmount: {
+    type: Number,
+    required: true
+  },
+  currency: {
+    type: String,
+    default: 'INR'
+  },
+  checkInDate: Date,
+  checkOutDate: Date,
+  travelDates: {
+    from: Date,
+    to: Date
+  },
+  guests: {
+    adults: {
+      type: Number,
+      default: 1
+    },
+    children: {
+      type: Number,
+      default: 0
+    }
+  },
+  contactInfo: {
+    fullName: String,
+    email: String,
+    phone: String
+  },
+  paymentInfo: {
+    method: {
+      type: String,
+      default: 'card'
+    },
+    amount: Number,
+    status: {
+      type: String,
+      enum: ['pending', 'completed', 'failed', 'refunded'],
+      default: 'completed'
+    },
+    paidAt: Date
+  },
+  specialRequests: String,
+  bookingDate: {
+    type: Date,
+    default: Date.now
+  },
+  hotel: {
+    id: String,
+    name: String,
+    price: Number,
+    image: String
+  },
+  cancellation: {
+    isCancelled: {
+      type: Boolean,
+      default: false
+    },
+    cancelledAt: Date,
+    reason: String,
+    refundAmount: Number,
+    refundStatus: {
+      type: String,
+      enum: ['pending', 'processed', 'rejected'],
+      default: 'pending'
+    }
+  }
+}, { _id: true });
+
 const UserSchema = new mongoose.Schema({
   fullName: {
     type: String,
@@ -67,6 +160,8 @@ const UserSchema = new mongoose.Schema({
       }
     }
   },
+  // Bookings made by the user
+  bookings: [bookingSchema],
   // Agent specific details
   agencyDetails: {
     name: {

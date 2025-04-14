@@ -156,8 +156,8 @@ const BookingSchema = new Schema({
   },
   confirmationNumber: {
     type: String,
-    required: true,
-    unique: true
+    unique: true,
+    sparse: true  // Allow null values to exist
   },
   cancellation: {
     isCancelled: { type: Boolean, default: false },
@@ -178,8 +178,10 @@ const BookingSchema = new Schema({
 
 // Generate a unique confirmation number
 BookingSchema.pre('save', async function(next) {
-  if (this.isNew) {
-    this.confirmationNumber = 'BK' + Math.floor(Math.random() * 10000000);
+  if (this.isNew && !this.confirmationNumber) {
+    const timestamp = new Date().getTime().toString().slice(-6);
+    const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+    this.confirmationNumber = `BK${timestamp}${random}`;
   }
   next();
 });

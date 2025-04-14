@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { FaClock, FaMapMarkerAlt, FaUser, FaMoneyBillWave, FaStar, FaSpinner } from 'react-icons/fa';
+import BookingModal from '../components/BookingModal';
 
 const PackageDetail = () => {
   const { id } = useParams();
@@ -9,12 +10,7 @@ const PackageDetail = () => {
   const [tourPackage, setTourPackage] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [isBookingOpen, setIsBookingOpen] = useState(false);
-  const [bookingData, setBookingData] = useState({
-    startDate: '',
-    guests: 1,
-    specialRequirements: ''
-  });
+  const [isBookingModalOpen, setIsBookingModalOpen] = useState(false);
   
   // Default image if none provided
   const defaultImage = 'https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=1121&q=80';
@@ -41,47 +37,17 @@ const PackageDetail = () => {
     fetchPackageDetails();
   }, [id]);
   
-  const handleBookingChange = (e) => {
-    const { name, value } = e.target;
-    setBookingData(prev => ({
-      ...prev,
-      [name]: value
-    }));
-  };
-  
-  const handleBookingSubmit = async (e) => {
-    e.preventDefault();
-    
-    try {
-      // Check if user is logged in
-      const token = localStorage.getItem('token');
-      if (!token) {
-        navigate('/login');
-        return;
-      }
-      
-      // Submit booking
-      const response = await axios.post('http://localhost:5000/api/bookings', 
-        {
-          packageId: id,
-          startDate: bookingData.startDate,
-          numberOfPeople: bookingData.guests,
-          specialRequirements: bookingData.specialRequirements
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`
-          }
-        }
-      );
-      
-      if (response.data.success) {
-        navigate('/booking-history');
-      }
-    } catch (err) {
-      console.error('Error creating booking:', err);
-      alert('Failed to create booking. Please try again.');
+  const handleBookNow = () => {
+    // Check if user is logged in
+    const token = localStorage.getItem('token');
+    if (!token) {
+      // Redirect to login page with return URL
+      navigate(`/login?redirect=/packages/${id}`);
+      return;
     }
+    
+    // Open booking modal
+    setIsBookingModalOpen(true);
   };
   
   if (loading) {
@@ -292,79 +258,12 @@ const PackageDetail = () => {
                   </div>
                 </div>
                 
-                {isBookingOpen ? (
-                  <form onSubmit={handleBookingSubmit} className="space-y-4">
-                    <div>
-                      <label className="block text-gray-700 font-medium mb-1" htmlFor="startDate">
-                        Start Date
-                      </label>
-                      <input
-                        type="date"
-                        id="startDate"
-                        name="startDate"
-                        value={bookingData.startDate}
-                        onChange={handleBookingChange}
-                        min={new Date().toISOString().split('T')[0]}
-                        className="w-full border border-gray-300 rounded px-3 py-2"
-                        required
-                      />
-                    </div>
-                    
-                    <div>
-                      <label className="block text-gray-700 font-medium mb-1" htmlFor="guests">
-                        Number of Guests
-                      </label>
-                      <input
-                        type="number"
-                        id="guests"
-                        name="guests"
-                        value={bookingData.guests}
-                        onChange={handleBookingChange}
-                        min={tourPackage.groupSize?.min || 1}
-                        max={tourPackage.groupSize?.max || 20}
-                        className="w-full border border-gray-300 rounded px-3 py-2"
-                        required
-                      />
-                    </div>
-                    
-                    <div>
-                      <label className="block text-gray-700 font-medium mb-1" htmlFor="specialRequirements">
-                        Special Requirements
-                      </label>
-                      <textarea
-                        id="specialRequirements"
-                        name="specialRequirements"
-                        value={bookingData.specialRequirements}
-                        onChange={handleBookingChange}
-                        rows="3"
-                        className="w-full border border-gray-300 rounded px-3 py-2"
-                      ></textarea>
-                    </div>
-                    
-                    <div className="flex gap-2 pt-2">
-                      <button
-                        type="button"
-                        onClick={() => setIsBookingOpen(false)}
-                        className="flex-1 bg-gray-200 text-gray-700 px-4 py-2 rounded hover:bg-gray-300"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="submit"
-                        className="flex-1 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-                      >
-                        Book Now
-                      </button>
-                    </div>
-                  </form>
-                ) : (
-                  <button
-                    onClick={() => setIsBookingOpen(true)}
-                    className="w-full bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-                  >
-                    Book Now
-                  </button>
-                )}
+                <button
+                  onClick={handleBookNow}
+                  className="w-full bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+                >
+                  Book Now
+                </button>
                 
                 {/* Agent Info */}
                 <div className="mt-6 border-t border-gray-200 pt-4">
@@ -430,6 +329,16 @@ const PackageDetail = () => {
           </div>
         </div>
       </div>
+      
+      {/* Booking Modal */}
+      {isBookingModalOpen && (
+        <BookingModal 
+          item={tourPackage} 
+          type="package" 
+          isOpen={isBookingModalOpen} 
+          onClose={() => setIsBookingModalOpen(false)}
+        />
+      )}
     </div>
   );
 };

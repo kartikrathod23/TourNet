@@ -18,7 +18,7 @@ const HotelRegister = () => {
       country: '',
       postalCode: ''
     },
-    starRating: '',
+    starRating: 0,
     amenities: '',
     policies: {
       checkInTime: '14:00',
@@ -153,6 +153,7 @@ const HotelRegister = () => {
           licenseNumber: formData.licenseNumber
         };
         
+        console.log('Sending hotel data:', hotelData);
         const response = await axios.post('http://localhost:5000/api/hotel-auth/register', hotelData);
         
         if (response.data.success) {
@@ -165,6 +166,7 @@ const HotelRegister = () => {
           setError(response.data.error || 'Registration failed. Please try again.');
         }
       } catch (err) {
+        console.error('Registration error:', err);
         const errorMessage = err.response?.data?.error || 'Server error. Please try again later.';
         setError(errorMessage);
       } finally {
